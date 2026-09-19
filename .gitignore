@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+
+data/
+BWdata/
+raw_kaggle_data/
+transformed_data.npz
+linear_color_model.npz
+linear_output.png
+linear_output_full_dataset.png
+outputphoto2.png

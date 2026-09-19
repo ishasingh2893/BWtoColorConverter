@@ -30,13 +30,13 @@ def image_to_lab_channels(image_path: Path) -> tuple[np.ndarray, np.ndarray, np.
     )
 
 
-def iter_image_paths(data_folder: Path) -> list[Path]:
+def iter_image_paths(data_folder: Path) -> list:
     extensions = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}
     if not data_folder.exists():
         raise FileNotFoundError(f"Training folder does not exist: {data_folder}")
     image_paths = [
         path
-        for path in sorted(data_folder.iterdir())
+        for path in sorted(data_folder.rglob("*"))
         if path.is_file() and path.suffix.lower() in extensions
     ]
     if not image_paths:
@@ -59,6 +59,67 @@ def load_training_channels(data_folder: Path) -> tuple[np.ndarray, np.ndarray, n
         np.vstack(l_values),
         np.vstack(a_values),
         np.vstack(b_values),
+    )
+
+
+def fit_streaming_pixelwise_linear_model(
+    data_folder: Path,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    num_pixels = IMAGE_SIZE[0] * IMAGE_SIZE[1]
+    sum_l = np.zeros(num_pixels, dtype=np.float64)
+    sum_l2 = np.zeros(num_pixels, dtype=np.float64)
+    sum_a = np.zeros(num_pixels, dtype=np.float64)
+    sum_b = np.zeros(num_pixels, dtype=np.float64)
+    sum_la = np.zeros(num_pixels, dtype=np.float64)
+    sum_lb = np.zeros(num_pixels, dtype=np.float64)
+
+    image_count = 0
+    for image_path in iter_image_paths(data_folder):
+        l_channel, a_channel, b_channel = image_to_lab_channels(image_path)
+        l_values = l_channel.astype(np.float64)
+        a_values = a_channel.astype(np.float64)
+        b_values = b_channel.astype(np.float64)
+
+        sum_l += l_values
+        sum_l2 += l_values * l_values
+        sum_a += a_values
+        sum_b += b_values
+        sum_la += l_values * a_values
+        sum_lb += l_values * b_values
+        image_count += 1
+
+        if image_count % 1000 == 0:
+            print(f"Processed {image_count} training images")
+
+    mean_l = sum_l / image_count
+    variance_l = (sum_l2 / image_count) - (mean_l * mean_l)
+
+    mean_a = sum_a / image_count
+    covariance_a = (sum_la / image_count) - (mean_l * mean_a)
+    a_slope = np.divide(
+        covariance_a,
+        variance_l,
+        out=np.zeros_like(covariance_a, dtype=np.float64),
+        where=variance_l > 1e-6,
+    )
+    a_intercept = mean_a - a_slope * mean_l
+
+    mean_b = sum_b / image_count
+    covariance_b = (sum_lb / image_count) - (mean_l * mean_b)
+    b_slope = np.divide(
+        covariance_b,
+        variance_l,
+        out=np.zeros_like(covariance_b, dtype=np.float64),
+        where=variance_l > 1e-6,
+    )
+    b_intercept = mean_b - b_slope * mean_l
+
+    return (
+        a_slope.astype(np.float32),
+        a_intercept.astype(np.float32),
+        b_slope.astype(np.float32),
+        b_intercept.astype(np.float32),
+        image_count,
     )
 
 
@@ -107,13 +168,19 @@ def train(
 ) -> None:
     if transformed_data_path is not None:
         l_values, a_values, b_values = load_transformed_channels(transformed_data_path)
+        training_count = l_values.shape[0]
+        a_slope, a_intercept = fit_pixelwise_linear_model(l_values, a_values)
+        b_slope, b_intercept = fit_pixelwise_linear_model(l_values, b_values)
     elif data_folder is not None:
-        l_values, a_values, b_values = load_training_channels(data_folder)
+        (
+            a_slope,
+            a_intercept,
+            b_slope,
+            b_intercept,
+            training_count,
+        ) = fit_streaming_pixelwise_linear_model(data_folder)
     else:
         raise FileNotFoundError("Provide --transformed-data or --data for training")
-
-    a_slope, a_intercept = fit_pixelwise_linear_model(l_values, a_values)
-    b_slope, b_intercept = fit_pixelwise_linear_model(l_values, b_values)
 
     np.savez_compressed(
         output_path,
@@ -123,10 +190,10 @@ def train(
         b_intercept=b_intercept,
         width=np.array([IMAGE_SIZE[0]], dtype=np.int32),
         height=np.array([IMAGE_SIZE[1]], dtype=np.int32),
-        training_count=np.array([l_values.shape[0]], dtype=np.int32),
+        training_count=np.array([training_count], dtype=np.int32),
     )
     print(f"Saved linear color model to {output_path}")
-    print(f"Training images: {l_values.shape[0]}")
+    print(f"Training images: {training_count}")
 
 
 def colorize(input_path: Path, model_path: Path, output_path: Path) -> None:
