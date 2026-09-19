@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Portrait Color Lab - Isha</title>
+    <meta
+      name="description"
+      content="Upload or link a black-and-white portrait and generate a colorized version."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="wordmark" href="https://isha-portfolio.vishaalsudarsan.chatgpt.site">Isha.</a>
+      <span class="appmark">PORTRAIT LAB <span>/</span> BW COLORIZER</span>
+      <a class="back" href="https://isha-portfolio.vishaalsudarsan.chatgpt.site/#work">
+        Back to portfolio
+        <span aria-hidden="true">↗</span>
+      </a>
+    </header>
+
+    <main>
+      <section class="heading">
+        <div>
+          <p class="eyebrow">PORTRAITS, REIMAGINED IN COLOR</p>
+          <h1>From black and white to <em>remembered color.</em></h1>
+          <p class="intro">
+            Upload a face portrait or paste a photo link. The model keeps the portrait structure
+            and predicts compact LAB color channels from learned training patterns.
+          </p>
+        </div>
+        <span class="edition">02 / IMAGE COLORIZATION</span>
+      </section>
+
+      {% if not model_ready %}
+      <section class="model-warning" role="status">
+        <strong>Model artifact needed.</strong>
+        <span>
+          Train <code>linear_color_model.npz</code> before generating results.
+        </span>
+      </section>
+      {% endif %}
+
+      <section class="workspace" aria-label="Portrait colorization workspace">
+        <form class="input-panel" id="colorize-form">
+          <p class="eyebrow">01 / INPUT</p>
+          <h2>Choose a portrait.</h2>
+
+          <label class="dropzone" id="dropzone">
+            <input id="photo-input" name="photo" type="file" accept="image/*" hidden />
+            <span class="upload-icon" aria-hidden="true">↑</span>
+            <strong>Drop a BW portrait here</strong>
+            <small>PNG, JPG, WebP, or a direct image upload under 12 MB</small>
+          </label>
+
+          <div class="divider"><span>or</span></div>
+
+          <label class="url-field">
+            <span>Photo link</span>
+            <input
+              id="image-url"
+              name="image_url"
+              type="url"
+              placeholder="https://example.com/portrait.jpg"
+              autocomplete="off"
+            />
+          </label>
+
+          <div class="actions">
+            <button type="submit" id="submit-button">Colorize portrait <span>→</span></button>
+          </div>
+
+          <p class="status" id="status" role="status"></p>
+        </form>
+
+        <section class="preview-panel" aria-label="Colorized output">
+          <div class="preview-head">
+            <div>
+              <p class="eyebrow">02 / OUTPUT</p>
+              <h2>Review the result.</h2>
+            </div>
+            <span id="result-badge">Waiting</span>
+          </div>
+
+          <div class="portrait-stage">
+            <figure>
+              <div class="empty-result" id="empty-input">
+                <strong>Input preview appears here.</strong>
+                <small>Upload a portrait or paste a photo link.</small>
+              </div>
+              <img id="input-preview" alt="Input portrait preview" hidden />
+              <figcaption>Input</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-result">
+                <strong>Color output appears here.</strong>
+                <small>Use a trained model for the final colorized portrait.</small>
+              </div>
+              <img id="output-preview" alt="Colorized portrait output" hidden />
+              <figcaption>Colorized</figcaption>
+            </figure>
+          </div>
+        </section>
+      </section>
+
+      <section class="notes">
+        <div>
+          <span>01</span>
+          <h3>Portrait-first training</h3>
+          <p>
+            Best results come from face portraits framed similarly to the training images.
+          </p>
+        </div>
+        <div>
+          <span>02</span>
+          <h3>Compact deployment</h3>
+          <p>
+            The deployed app only needs the learned linear parameters, not the whole training set.
+          </p>
+        </div>
+        <div>
+          <span>03</span>
+          <h3>Fast iteration</h3>
+          <p>
+            Compare outputs by retraining <code>linear_color_model.npz</code> as the dataset improves.
+          </p>
+        </div>
+      </section>
+
+      <footer>
+        <span class="wordmark">Isha.</span>
+        <p>Portrait Color Lab · BW to Color Converter</p>
+        <span>Built for visual experiments.</span>
+      </footer>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+  </body>
+</html>
