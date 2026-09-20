@@ -43,7 +43,15 @@
       <section class="model-warning" role="status">
         <strong>Model artifact needed.</strong>
         <span>
-          Train <code>linear_color_model.npz</code> before generating results.
+          Train <code>linear_color_model.npz</code> or <code>knn_lookup_color_model.npz</code>
+          before generating results.
+        </span>
+      </section>
+      {% else %}
+      <section class="model-warning model-ready" role="status">
+        <strong>{{ model_name }} model loaded.</strong>
+        <span>
+          The server will render every available model version for comparison.
         </span>
       </section>
       {% endif %}
@@ -91,20 +99,60 @@
 
           <div class="portrait-stage">
             <figure>
-              <div class="empty-result" id="empty-input">
-                <strong>Input preview appears here.</strong>
+              <div class="empty-result" id="empty-raw-input">
+                <strong>Raw input appears here.</strong>
                 <small>Upload a portrait or paste a photo link.</small>
               </div>
-              <img id="input-preview" alt="Input portrait preview" hidden />
-              <figcaption>Input</figcaption>
+              <img id="raw-input-preview" alt="Raw uploaded portrait preview" hidden />
+              <figcaption>Raw input</figcaption>
+            </figure>
+            <figure>
+              <div class="empty-result" id="empty-processed-input">
+                <strong>Processed input appears here.</strong>
+                <small>Face crop, padding, and 240x240 positioning.</small>
+              </div>
+              <img id="processed-input-preview" alt="Preprocessed portrait preview" hidden />
+              <figcaption>Processed input</figcaption>
+            </figure>
+            <figure>
+              <div class="empty-result" id="empty-edge-input">
+                <strong>Edge map appears here.</strong>
+                <small>Sliding-window Sobel preview.</small>
+              </div>
+              <img id="edge-input-preview" alt="Sliding-window Sobel edge detection preview" hidden />
+              <figcaption>Edge detection</figcaption>
+            </figure>
+            <figure>
+              <div class="empty-result" id="empty-outer-layer">
+                <strong>Outer layer appears here.</strong>
+                <small>External contour from the edge map.</small>
+              </div>
+              <img id="outer-layer-preview" alt="Outermost contour extracted from edge detection" hidden />
+              <figcaption>Outer layer</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-result">
-                <strong>Color output appears here.</strong>
-                <small>Use a trained model for the final colorized portrait.</small>
+              <div class="empty-result" id="empty-linear-result">
+                <strong>Linear output appears here.</strong>
+                <small>Pixel-wise regression.</small>
               </div>
-              <img id="output-preview" alt="Colorized portrait output" hidden />
-              <figcaption>Colorized</figcaption>
+              <img id="linear-output-preview" alt="Linear regression colorized portrait output" hidden />
+              <figcaption>Linear regression</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-knn-result">
+                <strong>KNN output appears here.</strong>
+                <small>Pixel and brightness lookup.</small>
+              </div>
+              <img id="knn-output-preview" alt="KNN colorized portrait output" hidden />
+              <figcaption>KNN lookup</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-hybrid-result">
+                <strong>Hybrid output appears here.</strong>
+                <small>KNN with foreground fallback.</small>
+              </div>
+              <img id="hybrid-output-preview" alt="Hybrid colorized portrait output" hidden />
+              <figcaption>Hybrid model</figcaption>
             </figure>
           </div>
         </section>
@@ -122,14 +170,14 @@
           <span>02</span>
           <h3>Compact deployment</h3>
           <p>
-            The deployed app only needs the learned linear parameters, not the whole training set.
+            The deployed app only needs the learned lookup artifact, not the whole training set.
           </p>
         </div>
         <div>
           <span>03</span>
           <h3>Fast iteration</h3>
           <p>
-            Compare outputs by retraining <code>linear_color_model.npz</code> as the dataset improves.
+            Compare outputs by retraining <code>knn_lookup_color_model.npz</code> as the dataset improves.
           </p>
         </div>
       </section>
