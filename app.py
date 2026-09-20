@@ -9,11 +9,18 @@ from urllib.parse import urljoin
 import requests
 from flask import Flask, jsonify, render_template, request
 
-from linear_color_model import colorize
+from knn_lookup_color_model import colorize as colorize_with_lookup
+from linear_color_model import colorize as colorize_with_linear
+from portrait_preprocess import (
+    crop_face_portrait,
+    save_edge_detection_preview,
+    save_outermost_layer_preview,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = BASE_DIR / "linear_color_model.npz"
+LOOKUP_MODEL_PATH = BASE_DIR / "knn_lookup_color_model.npz"
+LINEAR_MODEL_PATH = BASE_DIR / "linear_color_model.npz"
 MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 app = Flask(__name__)
@@ -85,18 +92,28 @@ def save_request_image(temp_dir: Path) -> Path:
 
 @app.get("/")
 def index():
-    return render_template("index.html", model_ready=MODEL_PATH.exists())
+    available_models = []
+    if LINEAR_MODEL_PATH.exists():
+        available_models.append("linear regression")
+    if LOOKUP_MODEL_PATH.exists():
+        available_models.extend(["KNN lookup", "hybrid KNN"])
+
+    return render_template(
+        "index.html",
+        model_ready=LOOKUP_MODEL_PATH.exists() or LINEAR_MODEL_PATH.exists(),
+        model_name=", ".join(available_models),
+    )
 
 
 @app.post("/api/colorize")
 def api_colorize():
-    if not MODEL_PATH.exists():
+    if not LOOKUP_MODEL_PATH.exists() and not LINEAR_MODEL_PATH.exists():
         return (
             jsonify(
                 {
                     "error": (
-                        "Model file linear_color_model.npz is missing. "
-                        "Run transformtrainingdata.py, then train the linear model."
+                        "Model artifact is missing. Train knn_lookup_color_model.npz "
+                        "or linear_color_model.npz before generating results."
                     )
                 }
             ),
@@ -107,9 +124,46 @@ def api_colorize():
         with tempfile.TemporaryDirectory(prefix="bw_colorizer_") as tmp:
             temp_dir = Path(tmp)
             input_path = save_request_image(temp_dir)
+            portrait_path = temp_dir / "portrait.png"
+            edge_path = temp_dir / "edges.png"
+            outer_layer_path = temp_dir / "outer_layer.png"
             output_path = temp_dir / "colorized.png"
-            colorize(input_path, MODEL_PATH, output_path)
-            return jsonify({"output": data_uri(output_path)})
+            crop_face_portrait(input_path, portrait_path)
+            save_edge_detection_preview(portrait_path, edge_path)
+            save_outermost_layer_preview(portrait_path, outer_layer_path)
+            outputs = {}
+
+            if LINEAR_MODEL_PATH.exists():
+                linear_output_path = temp_dir / "linear.png"
+                colorize_with_linear(portrait_path, LINEAR_MODEL_PATH, linear_output_path)
+                outputs["linear"] = data_uri(linear_output_path)
+
+            if LOOKUP_MODEL_PATH.exists():
+                knn_output_path = temp_dir / "knn.png"
+                hybrid_output_path = temp_dir / "hybrid.png"
+                colorize_with_lookup(
+                    portrait_path,
+                    LOOKUP_MODEL_PATH,
+                    knn_output_path,
+                    use_hybrid=False,
+                )
+                colorize_with_lookup(
+                    portrait_path,
+                    LOOKUP_MODEL_PATH,
+                    hybrid_output_path,
+                    use_hybrid=True,
+                )
+                outputs["knn"] = data_uri(knn_output_path)
+                outputs["hybrid"] = data_uri(hybrid_output_path)
+
+            return jsonify(
+                {
+                    "input": data_uri(portrait_path),
+                    "edges": data_uri(edge_path),
+                    "outer_layer": data_uri(outer_layer_path),
+                    "outputs": outputs,
+                }
+            )
     except requests.RequestException:
         return jsonify({"error": "Could not download the image from that link."}), 400
     except Exception as exc:

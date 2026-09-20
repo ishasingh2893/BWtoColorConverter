@@ -6,6 +6,8 @@ BWdata/
 raw_kaggle_data/
 transformed_data.npz
 linear_color_model.npz
+knn_lookup_color_model.npz
 linear_output.png
 linear_output_full_dataset.png
+knn_lookup_output.png
 outputphoto2.png

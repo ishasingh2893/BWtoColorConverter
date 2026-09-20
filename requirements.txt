@@ -5,3 +5,4 @@ plotly
 flask
 requests
 kagglehub
+opencv-python-headless<5
