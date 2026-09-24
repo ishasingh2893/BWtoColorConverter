@@ -6,24 +6,83 @@ const emptyRawInput = document.querySelector("#empty-raw-input");
 const rawInputPreview = document.querySelector("#raw-input-preview");
 const emptyProcessedInput = document.querySelector("#empty-processed-input");
 const processedInputPreview = document.querySelector("#processed-input-preview");
-const emptyEdgeInput = document.querySelector("#empty-edge-input");
-const edgeInputPreview = document.querySelector("#edge-input-preview");
-const emptyOuterLayer = document.querySelector("#empty-outer-layer");
-const outerLayerPreview = document.querySelector("#outer-layer-preview");
+const maskPreviews = {
+  rembg: {
+    image: document.querySelector("#rembg-subject-mask-preview"),
+    empty: document.querySelector("#empty-rembg-subject-mask"),
+  },
+  sobel_rembg: {
+    image: document.querySelector("#sobel-rembg-subject-mask-preview"),
+    empty: document.querySelector("#empty-sobel-rembg-subject-mask"),
+  },
+  mediapipe: {
+    image: document.querySelector("#mediapipe-subject-mask-preview"),
+    empty: document.querySelector("#empty-mediapipe-subject-mask"),
+  },
+  geometry: {
+    image: document.querySelector("#geometry-subject-mask-preview"),
+    empty: document.querySelector("#empty-geometry-subject-mask"),
+  },
+};
 const modelPreviews = {
-  linear: {
-    image: document.querySelector("#linear-output-preview"),
-    empty: document.querySelector("#empty-linear-result"),
+  linear_rembg: {
+    image: document.querySelector("#linear-rembg-output-preview"),
+    empty: document.querySelector("#empty-linear-rembg-result"),
     missing: "Linear model unavailable.",
   },
-  knn: {
-    image: document.querySelector("#knn-output-preview"),
-    empty: document.querySelector("#empty-knn-result"),
+  linear_sobel_rembg: {
+    image: document.querySelector("#linear-sobel-rembg-output-preview"),
+    empty: document.querySelector("#empty-linear-sobel-rembg-result"),
+    missing: "Linear model unavailable.",
+  },
+  linear_mediapipe: {
+    image: document.querySelector("#linear-mediapipe-output-preview"),
+    empty: document.querySelector("#empty-linear-mediapipe-result"),
+    missing: "Linear model unavailable.",
+  },
+  linear_geometry: {
+    image: document.querySelector("#linear-geometry-output-preview"),
+    empty: document.querySelector("#empty-linear-geometry-result"),
+    missing: "Linear model unavailable.",
+  },
+  knn_rembg: {
+    image: document.querySelector("#knn-rembg-output-preview"),
+    empty: document.querySelector("#empty-knn-rembg-result"),
     missing: "KNN model unavailable.",
   },
-  hybrid: {
-    image: document.querySelector("#hybrid-output-preview"),
-    empty: document.querySelector("#empty-hybrid-result"),
+  knn_sobel_rembg: {
+    image: document.querySelector("#knn-sobel-rembg-output-preview"),
+    empty: document.querySelector("#empty-knn-sobel-rembg-result"),
+    missing: "KNN model unavailable.",
+  },
+  knn_mediapipe: {
+    image: document.querySelector("#knn-mediapipe-output-preview"),
+    empty: document.querySelector("#empty-knn-mediapipe-result"),
+    missing: "KNN model unavailable.",
+  },
+  knn_geometry: {
+    image: document.querySelector("#knn-geometry-output-preview"),
+    empty: document.querySelector("#empty-knn-geometry-result"),
+    missing: "KNN model unavailable.",
+  },
+  hybrid_rembg: {
+    image: document.querySelector("#hybrid-rembg-output-preview"),
+    empty: document.querySelector("#empty-hybrid-rembg-result"),
+    missing: "Hybrid model unavailable.",
+  },
+  hybrid_sobel_rembg: {
+    image: document.querySelector("#hybrid-sobel-rembg-output-preview"),
+    empty: document.querySelector("#empty-hybrid-sobel-rembg-result"),
+    missing: "Hybrid model unavailable.",
+  },
+  hybrid_mediapipe: {
+    image: document.querySelector("#hybrid-mediapipe-output-preview"),
+    empty: document.querySelector("#empty-hybrid-mediapipe-result"),
+    missing: "Hybrid model unavailable.",
+  },
+  hybrid_geometry: {
+    image: document.querySelector("#hybrid-geometry-output-preview"),
+    empty: document.querySelector("#empty-hybrid-geometry-result"),
     missing: "Hybrid model unavailable.",
   },
 };
@@ -41,6 +100,10 @@ function setStatus(message, isError = false) {
 }
 
 function resetModelPreviews() {
+  Object.values(maskPreviews).forEach(({ image, empty }) => {
+    image.hidden = true;
+    empty.hidden = false;
+  });
   Object.values(modelPreviews).forEach((preview) => {
     preview.image.hidden = true;
     preview.empty.hidden = false;
@@ -67,10 +130,6 @@ function previewFile(file) {
   emptyRawInput.hidden = true;
   processedInputPreview.hidden = true;
   emptyProcessedInput.hidden = false;
-  edgeInputPreview.hidden = true;
-  emptyEdgeInput.hidden = false;
-  outerLayerPreview.hidden = true;
-  emptyOuterLayer.hidden = false;
   resetModelPreviews();
   imageUrlInput.value = "";
   resultBadge.textContent = "Ready";
@@ -106,10 +165,6 @@ imageUrlInput.addEventListener("input", () => {
   emptyRawInput.hidden = true;
   processedInputPreview.hidden = true;
   emptyProcessedInput.hidden = false;
-  edgeInputPreview.hidden = true;
-  emptyEdgeInput.hidden = false;
-  outerLayerPreview.hidden = true;
-  emptyOuterLayer.hidden = false;
   resetModelPreviews();
   resultBadge.textContent = "Linked";
 });
@@ -137,16 +192,13 @@ form.addEventListener("submit", async (event) => {
       processedInputPreview.hidden = false;
       emptyProcessedInput.hidden = true;
     }
-    if (data.edges) {
-      edgeInputPreview.src = data.edges;
-      edgeInputPreview.hidden = false;
-      emptyEdgeInput.hidden = true;
-    }
-    if (data.outer_layer) {
-      outerLayerPreview.src = data.outer_layer;
-      outerLayerPreview.hidden = false;
-      emptyOuterLayer.hidden = true;
-    }
+    Object.entries(data.subject_masks || {}).forEach(([key, value]) => {
+      const preview = maskPreviews[key];
+      if (!preview || !value) return;
+      preview.image.src = value;
+      preview.image.hidden = false;
+      preview.empty.hidden = true;
+    });
 
     setUnavailablePreviews();
     Object.entries(data.outputs || {}).forEach(([key, value]) => {
