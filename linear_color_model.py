@@ -8,6 +8,7 @@ from PIL import Image
 
 
 IMAGE_SIZE = (240, 240)
+WHITE_FILL_THRESHOLD = 248
 
 
 def add_white_background(img: Image.Image) -> Image.Image:
@@ -28,6 +29,57 @@ def image_to_lab_channels(image_path: Path) -> tuple[np.ndarray, np.ndarray, np.
         np.asarray(a_channel, dtype=np.float32).reshape(-1),
         np.asarray(b_channel, dtype=np.float32).reshape(-1),
     )
+
+
+def white_fill_mask(image_path: Path) -> np.ndarray:
+    img = Image.open(image_path)
+    img = add_white_background(img)
+    img = img.resize(IMAGE_SIZE)
+    rgb = np.asarray(img, dtype=np.uint8).reshape(-1, 3)
+    return np.all(rgb >= WHITE_FILL_THRESHOLD, axis=1)
+
+
+def neutralize_white_fill(
+    input_path: Path,
+    predicted_a: np.ndarray,
+    predicted_b: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    mask = white_fill_mask(input_path)
+    if not np.any(mask):
+        return predicted_a, predicted_b
+
+    predicted_a = predicted_a.copy()
+    predicted_b = predicted_b.copy()
+    predicted_a[mask] = 128
+    predicted_b[mask] = 128
+    return predicted_a, predicted_b
+
+
+def subject_mask_from_path(subject_mask_path: Optional[Path]) -> np.ndarray:
+    if subject_mask_path is None:
+        return np.ones(IMAGE_SIZE[0] * IMAGE_SIZE[1], dtype=bool)
+
+    mask = Image.open(subject_mask_path).convert("L").resize(IMAGE_SIZE)
+    mask_values = np.asarray(mask, dtype=np.uint8).reshape(-1)
+    return mask_values > 96
+
+
+def apply_subject_mask_to_lab(
+    l_channel: np.ndarray,
+    predicted_a: np.ndarray,
+    predicted_b: np.ndarray,
+    subject_mask_path: Optional[Path],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    subject = subject_mask_from_path(subject_mask_path)
+    l_uint8 = np.clip(l_channel, 0, 255).astype(np.uint8)
+    predicted_a = predicted_a.copy()
+    predicted_b = predicted_b.copy()
+
+    outside = ~subject
+    l_uint8[outside] = 255
+    predicted_a[outside] = 128
+    predicted_b[outside] = 128
+    return l_uint8, predicted_a, predicted_b
 
 
 def iter_image_paths(data_folder: Path) -> list:
@@ -196,7 +248,12 @@ def train(
     print(f"Training images: {training_count}")
 
 
-def colorize(input_path: Path, model_path: Path, output_path: Path) -> None:
+def colorize(
+    input_path: Path,
+    model_path: Path,
+    output_path: Path,
+    subject_mask_path: Optional[Path] = None,
+) -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input image does not exist: {input_path}")
     if not model_path.exists():
@@ -211,7 +268,12 @@ def colorize(input_path: Path, model_path: Path, output_path: Path) -> None:
     l_channel, _, _ = image_to_lab_channels(input_path)
     predicted_a = np.clip(a_slope * l_channel + a_intercept, 0, 255).astype(np.uint8)
     predicted_b = np.clip(b_slope * l_channel + b_intercept, 0, 255).astype(np.uint8)
-    l_uint8 = np.clip(l_channel, 0, 255).astype(np.uint8)
+    l_uint8, predicted_a, predicted_b = apply_subject_mask_to_lab(
+        l_channel,
+        predicted_a,
+        predicted_b,
+        subject_mask_path,
+    )
 
     lab_image = Image.merge(
         "LAB",
@@ -259,6 +321,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="linear_output.png",
         help="Output PNG image.",
     )
+    colorize_parser.add_argument(
+        "--subject-mask",
+        help="Optional mask image. Pixels outside the mask are rendered as white.",
+    )
 
     return parser
 
@@ -275,7 +341,8 @@ def main() -> None:
                 transformed_data_path = Path(args.transformed_data)
             train(Path(args.output), transformed_data_path, data_folder)
         elif args.command == "colorize":
-            colorize(Path(args.input), Path(args.model), Path(args.output))
+            subject_mask = Path(args.subject_mask) if args.subject_mask else None
+            colorize(Path(args.input), Path(args.model), Path(args.output), subject_mask)
         else:
             parser.error(f"Unknown command: {args.command}")
     except FileNotFoundError as exc:

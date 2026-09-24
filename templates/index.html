@@ -115,44 +115,132 @@
               <figcaption>Processed input</figcaption>
             </figure>
             <figure>
-              <div class="empty-result" id="empty-edge-input">
-                <strong>Edge map appears here.</strong>
-                <small>Sliding-window Sobel preview.</small>
+              <div class="empty-result" id="empty-rembg-subject-mask">
+                <strong>rembg mask appears here.</strong>
+                <small>rembg foreground/background separation.</small>
               </div>
-              <img id="edge-input-preview" alt="Sliding-window Sobel edge detection preview" hidden />
-              <figcaption>Edge detection</figcaption>
+              <img id="rembg-subject-mask-preview" alt="rembg subject mask preview" hidden />
+              <figcaption>rembg mask</figcaption>
             </figure>
             <figure>
-              <div class="empty-result" id="empty-outer-layer">
-                <strong>Outer layer appears here.</strong>
-                <small>External contour from the edge map.</small>
+              <div class="empty-result" id="empty-sobel-rembg-subject-mask">
+                <strong>Sobel + rembg mask appears here.</strong>
+                <small>rembg mask refined with Sobel outer edges.</small>
               </div>
-              <img id="outer-layer-preview" alt="Outermost contour extracted from edge detection" hidden />
-              <figcaption>Outer layer</figcaption>
+              <img id="sobel-rembg-subject-mask-preview" alt="Sobel and rembg subject mask preview" hidden />
+              <figcaption>Sobel + rembg mask</figcaption>
+            </figure>
+            <figure>
+              <div class="empty-result" id="empty-mediapipe-subject-mask">
+                <strong>MediaPipe mask appears here.</strong>
+                <small>Selfie segmentation foreground mask.</small>
+              </div>
+              <img id="mediapipe-subject-mask-preview" alt="MediaPipe subject mask preview" hidden />
+              <figcaption>MediaPipe mask</figcaption>
+            </figure>
+            <figure>
+              <div class="empty-result" id="empty-geometry-subject-mask">
+                <strong>Geometry mask appears here.</strong>
+                <small>Face-guided head and torso prior.</small>
+              </div>
+              <img id="geometry-subject-mask-preview" alt="Geometry-guided subject mask preview" hidden />
+              <figcaption>Geometry mask</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-linear-result">
-                <strong>Linear output appears here.</strong>
+              <div class="empty-result" id="empty-linear-rembg-result">
+                <strong>Linear rembg output appears here.</strong>
                 <small>Pixel-wise regression.</small>
               </div>
-              <img id="linear-output-preview" alt="Linear regression colorized portrait output" hidden />
-              <figcaption>Linear regression</figcaption>
+              <img id="linear-rembg-output-preview" alt="Linear regression colorized portrait output using rembg mask" hidden />
+              <figcaption>Linear / rembg</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-knn-result">
-                <strong>KNN output appears here.</strong>
+              <div class="empty-result" id="empty-linear-sobel-rembg-result">
+                <strong>Linear Sobel + rembg output appears here.</strong>
+                <small>Pixel-wise regression.</small>
+              </div>
+              <img id="linear-sobel-rembg-output-preview" alt="Linear regression colorized portrait output using Sobel and rembg mask" hidden />
+              <figcaption>Linear / Sobel + rembg</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-linear-mediapipe-result">
+                <strong>Linear MediaPipe output appears here.</strong>
+                <small>Pixel-wise regression.</small>
+              </div>
+              <img id="linear-mediapipe-output-preview" alt="Linear regression colorized portrait output using MediaPipe mask" hidden />
+              <figcaption>Linear / MediaPipe</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-linear-geometry-result">
+                <strong>Linear geometry output appears here.</strong>
+                <small>Pixel-wise regression.</small>
+              </div>
+              <img id="linear-geometry-output-preview" alt="Linear regression colorized portrait output using geometry mask" hidden />
+              <figcaption>Linear / Geometry</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-knn-rembg-result">
+                <strong>KNN rembg output appears here.</strong>
                 <small>Pixel and brightness lookup.</small>
               </div>
-              <img id="knn-output-preview" alt="KNN colorized portrait output" hidden />
-              <figcaption>KNN lookup</figcaption>
+              <img id="knn-rembg-output-preview" alt="KNN colorized portrait output using rembg mask" hidden />
+              <figcaption>KNN / rembg</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-hybrid-result">
-                <strong>Hybrid output appears here.</strong>
+              <div class="empty-result" id="empty-knn-sobel-rembg-result">
+                <strong>KNN Sobel + rembg output appears here.</strong>
+                <small>Pixel and brightness lookup.</small>
+              </div>
+              <img id="knn-sobel-rembg-output-preview" alt="KNN colorized portrait output using Sobel and rembg mask" hidden />
+              <figcaption>KNN / Sobel + rembg</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-knn-mediapipe-result">
+                <strong>KNN MediaPipe output appears here.</strong>
+                <small>Pixel and brightness lookup.</small>
+              </div>
+              <img id="knn-mediapipe-output-preview" alt="KNN colorized portrait output using MediaPipe mask" hidden />
+              <figcaption>KNN / MediaPipe</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-knn-geometry-result">
+                <strong>KNN geometry output appears here.</strong>
+                <small>Pixel and brightness lookup.</small>
+              </div>
+              <img id="knn-geometry-output-preview" alt="KNN colorized portrait output using geometry mask" hidden />
+              <figcaption>KNN / Geometry</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-hybrid-rembg-result">
+                <strong>Hybrid rembg output appears here.</strong>
                 <small>KNN with foreground fallback.</small>
               </div>
-              <img id="hybrid-output-preview" alt="Hybrid colorized portrait output" hidden />
-              <figcaption>Hybrid model</figcaption>
+              <img id="hybrid-rembg-output-preview" alt="Hybrid colorized portrait output using rembg mask" hidden />
+              <figcaption>Hybrid / rembg</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-hybrid-sobel-rembg-result">
+                <strong>Hybrid Sobel + rembg output appears here.</strong>
+                <small>KNN with foreground fallback.</small>
+              </div>
+              <img id="hybrid-sobel-rembg-output-preview" alt="Hybrid colorized portrait output using Sobel and rembg mask" hidden />
+              <figcaption>Hybrid / Sobel + rembg</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-hybrid-mediapipe-result">
+                <strong>Hybrid MediaPipe output appears here.</strong>
+                <small>KNN with foreground fallback.</small>
+              </div>
+              <img id="hybrid-mediapipe-output-preview" alt="Hybrid colorized portrait output using MediaPipe mask" hidden />
+              <figcaption>Hybrid / MediaPipe</figcaption>
+            </figure>
+            <figure class="result-frame">
+              <div class="empty-result" id="empty-hybrid-geometry-result">
+                <strong>Hybrid geometry output appears here.</strong>
+                <small>KNN with foreground fallback.</small>
+              </div>
+              <img id="hybrid-geometry-output-preview" alt="Hybrid colorized portrait output using geometry mask" hidden />
+              <figcaption>Hybrid / Geometry</figcaption>
             </figure>
           </div>
         </section>

@@ -13,8 +13,7 @@ from knn_lookup_color_model import colorize as colorize_with_lookup
 from linear_color_model import colorize as colorize_with_linear
 from portrait_preprocess import (
     crop_face_portrait,
-    save_edge_detection_preview,
-    save_outermost_layer_preview,
+    save_subject_mask_preview,
 )
 
 
@@ -125,42 +124,76 @@ def api_colorize():
             temp_dir = Path(tmp)
             input_path = save_request_image(temp_dir)
             portrait_path = temp_dir / "portrait.png"
-            edge_path = temp_dir / "edges.png"
-            outer_layer_path = temp_dir / "outer_layer.png"
-            output_path = temp_dir / "colorized.png"
+            rembg_mask_path = temp_dir / "rembg_subject_mask.png"
+            sobel_rembg_mask_path = temp_dir / "sobel_rembg_subject_mask.png"
+            mediapipe_mask_path = temp_dir / "mediapipe_subject_mask.png"
+            geometry_mask_path = temp_dir / "geometry_subject_mask.png"
             crop_face_portrait(input_path, portrait_path)
-            save_edge_detection_preview(portrait_path, edge_path)
-            save_outermost_layer_preview(portrait_path, outer_layer_path)
+            save_subject_mask_preview(portrait_path, rembg_mask_path, method="rembg")
+            save_subject_mask_preview(
+                portrait_path,
+                sobel_rembg_mask_path,
+                method="sobel_rembg",
+            )
+            save_subject_mask_preview(
+                portrait_path,
+                mediapipe_mask_path,
+                method="mediapipe",
+            )
+            save_subject_mask_preview(
+                portrait_path,
+                geometry_mask_path,
+                method="geometry",
+            )
+            mask_paths = (
+                ("rembg", rembg_mask_path),
+                ("sobel_rembg", sobel_rembg_mask_path),
+                ("mediapipe", mediapipe_mask_path),
+                ("geometry", geometry_mask_path),
+            )
             outputs = {}
 
             if LINEAR_MODEL_PATH.exists():
-                linear_output_path = temp_dir / "linear.png"
-                colorize_with_linear(portrait_path, LINEAR_MODEL_PATH, linear_output_path)
-                outputs["linear"] = data_uri(linear_output_path)
+                for mask_name, mask_path in mask_paths:
+                    linear_output_path = temp_dir / f"linear_{mask_name}.png"
+                    colorize_with_linear(
+                        portrait_path,
+                        LINEAR_MODEL_PATH,
+                        linear_output_path,
+                        mask_path,
+                    )
+                    outputs[f"linear_{mask_name}"] = data_uri(linear_output_path)
 
             if LOOKUP_MODEL_PATH.exists():
-                knn_output_path = temp_dir / "knn.png"
-                hybrid_output_path = temp_dir / "hybrid.png"
-                colorize_with_lookup(
-                    portrait_path,
-                    LOOKUP_MODEL_PATH,
-                    knn_output_path,
-                    use_hybrid=False,
-                )
-                colorize_with_lookup(
-                    portrait_path,
-                    LOOKUP_MODEL_PATH,
-                    hybrid_output_path,
-                    use_hybrid=True,
-                )
-                outputs["knn"] = data_uri(knn_output_path)
-                outputs["hybrid"] = data_uri(hybrid_output_path)
+                for mask_name, mask_path in mask_paths:
+                    knn_output_path = temp_dir / f"knn_{mask_name}.png"
+                    hybrid_output_path = temp_dir / f"hybrid_{mask_name}.png"
+                    colorize_with_lookup(
+                        portrait_path,
+                        LOOKUP_MODEL_PATH,
+                        knn_output_path,
+                        use_hybrid=False,
+                        subject_mask_path=mask_path,
+                    )
+                    colorize_with_lookup(
+                        portrait_path,
+                        LOOKUP_MODEL_PATH,
+                        hybrid_output_path,
+                        use_hybrid=True,
+                        subject_mask_path=mask_path,
+                    )
+                    outputs[f"knn_{mask_name}"] = data_uri(knn_output_path)
+                    outputs[f"hybrid_{mask_name}"] = data_uri(hybrid_output_path)
 
             return jsonify(
                 {
                     "input": data_uri(portrait_path),
-                    "edges": data_uri(edge_path),
-                    "outer_layer": data_uri(outer_layer_path),
+                    "subject_masks": {
+                        "rembg": data_uri(rembg_mask_path),
+                        "sobel_rembg": data_uri(sobel_rembg_mask_path),
+                        "mediapipe": data_uri(mediapipe_mask_path),
+                        "geometry": data_uri(geometry_mask_path),
+                    },
                     "outputs": outputs,
                 }
             )

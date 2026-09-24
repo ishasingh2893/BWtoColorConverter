@@ -1,14 +1,22 @@
 import argparse
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 from PIL import Image
 
-from linear_color_model import IMAGE_SIZE, add_white_background, image_to_lab_channels, iter_image_paths
+from linear_color_model import (
+    IMAGE_SIZE,
+    add_white_background,
+    apply_subject_mask_to_lab,
+    image_to_lab_channels,
+    iter_image_paths,
+    subject_mask_from_path,
+)
 from portrait_preprocess import (
     detect_largest_face,
-    foreground_mask_from_face,
     load_image_for_cv,
+    subject_mask_for_image,
 )
 
 
@@ -206,15 +214,22 @@ def foreground_mask_for_input(input_path: Path) -> np.ndarray:
     try:
         image = load_image_for_cv(input_path)
         face = detect_largest_face(image)
-        if face is None:
-            return np.zeros(IMAGE_SIZE[0] * IMAGE_SIZE[1], dtype=bool)
-        mask = foreground_mask_from_face(image, face)
+        mask = subject_mask_for_image(image, face)
         mask = np.array(
             Image.fromarray((mask * 255).astype(np.uint8)).resize(IMAGE_SIZE)
         )
         return mask.reshape(-1) > 96
     except Exception:
         return np.zeros(IMAGE_SIZE[0] * IMAGE_SIZE[1], dtype=bool)
+
+
+def foreground_mask_for_colorize(
+    input_path: Path,
+    subject_mask_path: Optional[Path],
+) -> np.ndarray:
+    if subject_mask_path is not None:
+        return subject_mask_from_path(subject_mask_path)
+    return foreground_mask_for_input(input_path)
 
 
 def apply_foreground_fallback(
@@ -255,6 +270,7 @@ def colorize(
     model_path: Path,
     output_path: Path,
     use_hybrid: bool = True,
+    subject_mask_path: Optional[Path] = None,
 ) -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input image does not exist: {input_path}")
@@ -273,7 +289,7 @@ def colorize(
     predicted_a = lookup_a[pixel_indices, l_uint8].astype(np.uint8)
     predicted_b = lookup_b[pixel_indices, l_uint8].astype(np.uint8)
     if use_hybrid and global_lookup_a is not None and global_lookup_b is not None:
-        foreground = foreground_mask_for_input(input_path)
+        foreground = foreground_mask_for_colorize(input_path, subject_mask_path)
         predicted_a, predicted_b = apply_foreground_fallback(
             l_uint8,
             predicted_a,
@@ -282,6 +298,13 @@ def colorize(
             global_lookup_a,
             global_lookup_b,
         )
+
+    l_uint8, predicted_a, predicted_b = apply_subject_mask_to_lab(
+        l_channel,
+        predicted_a,
+        predicted_b,
+        subject_mask_path,
+    )
 
     lab_image = Image.merge(
         "LAB",

@@ -1,18 +1,28 @@
 from pathlib import Path
 from typing import Optional, Tuple
+import io
 import json
+import urllib.request
 
 import cv2
 import numpy as np
+from PIL import Image
 
 
 IMAGE_SIZE = (240, 240)
 CALIBRATION_PATH = Path(__file__).resolve().parent / "face_crop_calibration.json"
+MEDIAPIPE_MODEL_PATH = Path(__file__).resolve().parent / "models" / "selfie_segmenter.tflite"
+MEDIAPIPE_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+    "selfie_segmenter/float16/latest/selfie_segmenter.tflite"
+)
 TARGET_FACE_WIDTH_RATIO = 0.5417
 TARGET_FACE_CENTER_X = 0.4938
 TARGET_FACE_CENTER_Y = 0.5333
 MIN_TOP_MARGIN_FACE_RATIO = 0.65
 EDGE_REFINEMENT_STEPS = 7
+REMBG_SESSION = None
+MEDIAPIPE_IMAGE_SEGMENTER = None
 
 
 def load_crop_calibration() -> Tuple[float, float, float]:
@@ -92,8 +102,6 @@ def crop_face_portrait(input_path: Path, output_path: Path) -> Path:
     )
     left, top, right, bottom = crop
     portrait = crop_with_padding(image, left, top, right, bottom)
-    face_in_crop = (x - left, y - top, width, height)
-    portrait = replace_background_with_white(portrait, face_in_crop)
     portrait = cv2.resize(portrait, IMAGE_SIZE, interpolation=cv2.INTER_AREA)
     cv2.imwrite(str(output_path), portrait)
     return output_path
@@ -118,6 +126,14 @@ def edge_detection_sliding_window(image: np.ndarray) -> np.ndarray:
     return output_image.astype(np.uint8)
 
 
+def sobel_gradient_edges(image: np.ndarray) -> np.ndarray:
+    gray = cv2.GaussianBlur(image, (5, 5), 0)
+    gradient_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gradient_y = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    magnitude = cv2.magnitude(gradient_x, gradient_y)
+    return cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+
 def save_edge_detection_preview(input_path: Path, output_path: Path) -> Path:
     image = load_image_for_cv(input_path)
     grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -126,10 +142,109 @@ def save_edge_detection_preview(input_path: Path, output_path: Path) -> Path:
     return output_path
 
 
+def save_subject_mask_preview(
+    input_path: Path,
+    output_path: Path,
+    method: str = "rembg",
+) -> Path:
+    image = load_image_for_cv(input_path)
+    mask = subject_mask_for_image(image, method=method)
+    preview = np.clip(mask * 255, 0, 255).astype(np.uint8)
+    cv2.imwrite(str(output_path), preview)
+    return output_path
+
+
+def save_edge_overlay_preview(input_path: Path, output_path: Path) -> Path:
+    image = load_image_for_cv(input_path)
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edge_image = edge_detection_sliding_window(grayscale)
+    _, strong_edges = cv2.threshold(edge_image, 80, 255, cv2.THRESH_BINARY)
+
+    overlay = image.copy()
+    overlay[strong_edges > 0] = (60, 60, 255)
+    blended = cv2.addWeighted(image, 0.72, overlay, 0.28, 0)
+    cv2.imwrite(str(output_path), blended)
+    return output_path
+
+
+def boundary_from_strong_edges(
+    edge_image: np.ndarray,
+    prior_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    edge_image = edge_image.copy()
+    border_margin = 8
+    edge_image[:border_margin, :] = 0
+    edge_image[-border_margin:, :] = 0
+    edge_image[:, :border_margin] = 0
+    edge_image[:, -border_margin:] = 0
+
+    if prior_mask is not None:
+        edge_image = edge_image * (prior_mask > 0)
+
+    _, boundary = cv2.threshold(edge_image, 80, 255, cv2.THRESH_BINARY)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    boundary = cv2.morphologyEx(boundary, cv2.MORPH_OPEN, kernel, iterations=1)
+    return boundary
+
+
+def save_boundary_preview(input_path: Path, output_path: Path) -> Path:
+    image = load_image_for_cv(input_path)
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edge_image = edge_detection_sliding_window(grayscale)
+    face = detect_largest_face(image)
+    prior_mask = None
+    if face is not None:
+        prior_mask = geometric_foreground_mask(image, face)
+        prior_mask = cv2.dilate(
+            prior_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)),
+            iterations=1,
+        )
+    boundary = boundary_from_strong_edges(edge_image, prior_mask)
+    cv2.imwrite(str(output_path), boundary)
+    return output_path
+
+
+def save_connected_boundary_preview(input_path: Path, output_path: Path) -> Path:
+    image = load_image_for_cv(input_path)
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edge_image = edge_detection_sliding_window(grayscale)
+    face = detect_largest_face(image)
+    prior_mask = None
+    if face is not None:
+        prior_mask = geometric_foreground_mask(image, face)
+        prior_mask = cv2.dilate(
+            prior_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)),
+            iterations=1,
+        )
+
+    strong_boundary = boundary_from_strong_edges(edge_image, prior_mask)
+    connected_boundary = outermost_layer_from_edges(strong_boundary, prior_mask)
+    cv2.imwrite(str(output_path), connected_boundary)
+    return output_path
+
+
 def outermost_layer_from_edges(
     edge_image: np.ndarray,
     prior_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
+    image_height, image_width = edge_image.shape
+    output = np.zeros((image_height, image_width, 3), dtype=np.uint8)
+    left_points, right_points, binary_edges, allowed_mask = outer_layer_boundary_points(
+        edge_image,
+        prior_mask,
+    )
+    draw_boundary_polyline(output, left_points)
+    draw_boundary_polyline(output, right_points)
+    draw_top_boundary_bridge(output, left_points, right_points, binary_edges, allowed_mask)
+    return output
+
+
+def outer_layer_boundary_points(
+    edge_image: np.ndarray,
+    prior_mask: Optional[np.ndarray] = None,
+) -> tuple[list[Tuple[int, int]], list[Tuple[int, int]], np.ndarray, np.ndarray]:
     edge_image = edge_image.copy()
     border_margin = 8
     edge_image[:border_margin, :] = 0
@@ -143,17 +258,47 @@ def outermost_layer_from_edges(
         edge_image = edge_image * allowed_mask
 
     _, binary_edges = cv2.threshold(edge_image, 80, 255, cv2.THRESH_BINARY)
-    image_height, image_width = edge_image.shape
-    output = np.zeros((image_height, image_width, 3), dtype=np.uint8)
+    left_points = smooth_boundary_points(
+        boundary_points_by_row(binary_edges, allowed_mask, "left")
+    )
+    right_points = smooth_boundary_points(
+        boundary_points_by_row(binary_edges, allowed_mask, "right")
+    )
+    return left_points, right_points, binary_edges, allowed_mask
 
-    left_points = boundary_points_by_row(binary_edges, allowed_mask, "left")
-    right_points = boundary_points_by_row(binary_edges, allowed_mask, "right")
-    left_points = smooth_boundary_points(left_points)
-    right_points = smooth_boundary_points(right_points)
-    draw_boundary_polyline(output, left_points)
-    draw_boundary_polyline(output, right_points)
-    draw_top_boundary_bridge(output, left_points, right_points)
-    return output
+
+def outer_layer_mask_from_edges(
+    edge_image: np.ndarray,
+    prior_mask: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    left_points, right_points, _, _ = outer_layer_boundary_points(edge_image, prior_mask)
+    mask = np.zeros(edge_image.shape, dtype=np.uint8)
+    if len(left_points) < 2 or len(right_points) < 2:
+        return mask
+
+    polygon = np.array(left_points + list(reversed(right_points)), dtype=np.int32)
+    cv2.fillPoly(mask, [polygon], 1)
+    return mask
+
+
+def outer_layer_mask_for_image(image: np.ndarray) -> np.ndarray:
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edge_image = edge_detection_sliding_window(grayscale)
+    face = detect_largest_face(image)
+    prior_mask = None
+    if face is not None:
+        prior_mask = geometric_foreground_mask(image, face)
+        prior_mask = cv2.dilate(
+            prior_mask,
+            cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)),
+            iterations=1,
+        )
+    return outer_layer_mask_from_edges(edge_image, prior_mask)
+
+
+def outer_layer_mask_for_path(input_path: Path) -> np.ndarray:
+    image = load_image_for_cv(input_path)
+    return outer_layer_mask_for_image(image)
 
 
 def boundary_points_by_row(
@@ -215,17 +360,16 @@ def choose_connected_boundary_x(xs: np.ndarray, last_x: int, side: str) -> int:
 
 
 def smooth_boundary_points(points: list[Tuple[int, int]]) -> list[Tuple[int, int]]:
-    if len(points) < 5:
+    if len(points) < 7:
         return points
 
-    smoothed = []
-    half_window = 2
-    for index, (_, y) in enumerate(points):
-        start = max(0, index - half_window)
-        end = min(len(points), index + half_window + 1)
-        x_values = [point[0] for point in points[start:end]]
-        smoothed.append((int(np.median(x_values)), y))
-    return smoothed
+    xs = np.array([point[0] for point in points], dtype=np.float32)
+    ys = np.array([point[1] for point in points], dtype=np.int32)
+    kernel = np.array([1, 4, 7, 10, 13, 10, 7, 4, 1], dtype=np.float32)
+    kernel /= kernel.sum()
+    padded_xs = np.pad(xs, (4, 4), mode="edge")
+    smoothed_xs = np.convolve(padded_xs, kernel, mode="valid")
+    return [(int(round(x)), int(y)) for x, y in zip(smoothed_xs, ys)]
 
 
 def draw_boundary_polyline(
@@ -255,6 +399,7 @@ def draw_segment(output: np.ndarray, points: list[Tuple[int, int]]) -> None:
         isClosed=False,
         color=(255, 255, 255),
         thickness=2,
+        lineType=cv2.LINE_AA,
     )
 
 
@@ -262,20 +407,78 @@ def draw_top_boundary_bridge(
     output: np.ndarray,
     left_points: list[Tuple[int, int]],
     right_points: list[Tuple[int, int]],
+    binary_edges: np.ndarray,
+    allowed_mask: np.ndarray,
 ) -> None:
     if not left_points or not right_points:
         return
 
     left_top = left_points[0]
     right_top = right_points[0]
+    start_x = min(left_top[0], right_top[0])
+    end_x = max(left_top[0], right_top[0])
     top_y = min(left_top[1], right_top[1])
-    cv2.line(
+    search_top = max(0, top_y - 14)
+    search_bottom = min(binary_edges.shape[0], top_y + 24)
+    bridge_points = []
+
+    for x in range(start_x, end_x + 1):
+        column = (binary_edges[search_top:search_bottom, x] > 0) & allowed_mask[
+            search_top:search_bottom,
+            x,
+        ]
+        ys = np.flatnonzero(column)
+        if ys.size:
+            bridge_points.append((x, int(search_top + ys[0])))
+
+    if len(bridge_points) < 3:
+        mid_x = (start_x + end_x) // 2
+        arch_y = max(0, top_y - 5)
+        bridge_points = [left_top, (mid_x, arch_y), right_top]
+
+    bridge_points = smooth_top_bridge_points(left_top, right_top, bridge_points)
+    cv2.polylines(
         output,
-        (left_top[0], top_y),
-        (right_top[0], top_y),
-        (255, 255, 255),
+        [np.array(bridge_points, dtype=np.int32)],
+        isClosed=False,
+        color=(255, 255, 255),
         thickness=2,
+        lineType=cv2.LINE_AA,
     )
+
+
+def smooth_top_bridge_points(
+    left_top: Tuple[int, int],
+    right_top: Tuple[int, int],
+    points: list[Tuple[int, int]],
+) -> list[Tuple[int, int]]:
+    if len(points) < 5:
+        return points
+
+    start_x = min(left_top[0], right_top[0])
+    end_x = max(left_top[0], right_top[0])
+    edge_top_y = min(point[1] for point in points)
+    endpoint_y = min(left_top[1], right_top[1])
+    control_y = max(0, min(edge_top_y, endpoint_y) - 5)
+    control_x = (start_x + end_x) / 2
+
+    curve = []
+    steps = max(12, end_x - start_x)
+    for index in range(steps + 1):
+        t = index / steps
+        one_minus_t = 1 - t
+        x = (
+            one_minus_t * one_minus_t * left_top[0]
+            + 2 * one_minus_t * t * control_x
+            + t * t * right_top[0]
+        )
+        y = (
+            one_minus_t * one_minus_t * left_top[1]
+            + 2 * one_minus_t * t * control_y
+            + t * t * right_top[1]
+        )
+        curve.append((int(round(x)), int(round(y))))
+    return curve
 
 
 def save_outermost_layer_preview(input_path: Path, output_path: Path) -> Path:
@@ -527,15 +730,406 @@ def replace_background_with_white(
     image: np.ndarray,
     face_box: Tuple[int, int, int, int],
 ) -> np.ndarray:
-    return image
+    mask = subject_mask_for_image(image, face_box)
+    mask = compositing_mask_for_subject(mask, face_box)
+    return apply_white_background(image, mask)
+
+
+def compositing_mask_for_subject(
+    subject_mask: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+) -> np.ndarray:
+    alpha = np.clip((subject_mask.astype(np.float32) - 0.28) / 0.36, 0, 1)
+    alpha = cv2.GaussianBlur(alpha, (3, 3), 0)
+
+    x, y, width, height = face_box
+    image_height, image_width = alpha.shape[:2]
+    face_left = max(0, int(x - width * 0.08))
+    face_top = max(0, int(y - height * 0.08))
+    face_right = min(image_width, int(x + width * 1.08))
+    face_bottom = min(image_height, int(y + height * 1.08))
+    alpha[face_top:face_bottom, face_left:face_right] = 1
+
+    confident_subject = (subject_mask > 0.78).astype(np.uint8)
+    confident_subject = cv2.dilate(
+        confident_subject,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=1,
+    )
+    alpha[confident_subject > 0] = 1
+    return np.clip(alpha, 0, 1)
+
+
+def subject_mask_for_image(
+    image: np.ndarray,
+    face_box: Optional[Tuple[int, int, int, int]] = None,
+    method: str = "rembg",
+) -> np.ndarray:
+    if method == "geometry":
+        mask = geometry_guided_subject_mask(image, face_box)
+    elif method == "mediapipe":
+        mask = mediapipe_subject_mask(image)
+    elif method == "rembg":
+        mask = rembg_subject_mask(image)
+    elif method in {"sobel_rembg", "sobel_rmeb", "rmeb_sobel"}:
+        mask = sobel_rembg_subject_mask(image, face_box)
+    else:
+        raise ValueError(f"Unknown subject mask method: {method}")
+
+    if mask is None and face_box is not None:
+        mask = foreground_mask_from_face(image, face_box)
+    if mask is None:
+        detected_face = detect_largest_face(image)
+        if detected_face is not None:
+            mask = foreground_mask_from_face(image, detected_face)
+    if mask is None:
+        return np.ones(image.shape[:2], dtype=np.uint8)
+
+    foreground_ratio = float(mask.mean())
+    if foreground_ratio < 0.05 or foreground_ratio > 0.98:
+        if face_box is not None:
+            return foreground_mask_from_face(image, face_box)
+    return clean_subject_mask(mask)
+
+
+def sobel_rembg_subject_mask(
+    image: np.ndarray,
+    face_box: Optional[Tuple[int, int, int, int]] = None,
+) -> Optional[np.ndarray]:
+    rembg_mask = rembg_subject_mask(image)
+    if rembg_mask is None:
+        if face_box is None:
+            face_box = detect_largest_face(image)
+        if face_box is None:
+            return None
+        rembg_mask = foreground_mask_from_face(image, face_box).astype(np.float32)
+
+    refined = refine_mask_outer_boundary_with_sobel(image, rembg_mask, face_box)
+    if refined is None:
+        return rembg_mask
+
+    return np.maximum(refined, rembg_mask * 0.82)
+
+
+def refine_mask_outer_boundary_with_sobel(
+    image: np.ndarray,
+    base_mask: np.ndarray,
+    face_box: Optional[Tuple[int, int, int, int]] = None,
+) -> Optional[np.ndarray]:
+    if face_box is None:
+        face_box = detect_largest_face(image)
+
+    image_height, image_width = base_mask.shape[:2]
+    binary = (base_mask > 0.38).astype(np.uint8)
+    if int(binary.sum()) < image_width * image_height * 0.04:
+        return None
+
+    grayscale = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    sobel_edges = sobel_gradient_edges(grayscale)
+    edge_threshold = max(35, int(np.percentile(sobel_edges[binary > 0], 62)))
+    strong_edges = sobel_edges >= edge_threshold
+
+    search_radius = max(5, int(image_width * 0.045))
+    min_width = max(18, int(image_width * 0.12))
+    row_points = []
+
+    for y in range(2, image_height - 2):
+        xs = np.flatnonzero(binary[y] > 0)
+        if xs.size < min_width:
+            continue
+
+        left = int(xs[0])
+        right = int(xs[-1])
+        left = snap_boundary_to_sobel(
+            strong_edges,
+            sobel_edges,
+            y,
+            left,
+            -search_radius,
+            search_radius,
+        )
+        right = snap_boundary_to_sobel(
+            strong_edges,
+            sobel_edges,
+            y,
+            right,
+            -search_radius,
+            search_radius,
+        )
+        if right - left >= min_width:
+            row_points.append((y, left, right))
+
+    if len(row_points) < image_height * 0.18:
+        return None
+
+    row_points = smooth_boundary_rows(row_points)
+    left_points = [(left, y) for y, left, _ in row_points]
+    right_points = [(right, y) for y, _, right in row_points]
+
+    mask = np.zeros((image_height, image_width), dtype=np.uint8)
+    polygon = np.array(left_points + list(reversed(right_points)), dtype=np.int32)
+    cv2.fillPoly(mask, [polygon], 255)
+
+    if face_box is not None:
+        x, y, width, height = face_box
+        face_left = max(0, int(x - width * 0.06))
+        face_top = max(0, int(y - height * 0.08))
+        face_right = min(image_width, int(x + width * 1.06))
+        face_bottom = min(image_height, int(y + height * 1.10))
+        mask[face_top:face_bottom, face_left:face_right] = 255
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (5, 5), 0)
+    return np.clip(mask, 0, 1)
+
+
+def snap_boundary_to_sobel(
+    strong_edges: np.ndarray,
+    sobel_edges: np.ndarray,
+    y: int,
+    x: int,
+    left_offset: int,
+    right_offset: int,
+) -> int:
+    image_width = strong_edges.shape[1]
+    start = max(1, x + left_offset)
+    end = min(image_width - 1, x + right_offset + 1)
+    if start >= end:
+        return x
+
+    edge_slice = strong_edges[max(0, y - 1) : y + 2, start:end]
+    scores = sobel_edges[max(0, y - 1) : y + 2, start:end].max(axis=0)
+    candidates = np.flatnonzero(edge_slice.any(axis=0))
+    if candidates.size == 0:
+        return x
+
+    candidate_scores = scores[candidates]
+    best_score = candidate_scores.max()
+    best_candidates = candidates[candidate_scores == best_score]
+    nearest = best_candidates[np.argmin(np.abs((start + best_candidates) - x))]
+    return int(start + nearest)
+
+
+def smooth_boundary_rows(
+    row_points: list[Tuple[int, int, int]],
+) -> list[Tuple[int, int, int]]:
+    if len(row_points) < 7:
+        return row_points
+
+    ys = np.array([point[0] for point in row_points], dtype=np.int32)
+    lefts = np.array([point[1] for point in row_points], dtype=np.float32)
+    rights = np.array([point[2] for point in row_points], dtype=np.float32)
+    kernel = np.array([1, 3, 5, 3, 1], dtype=np.float32)
+    kernel /= kernel.sum()
+
+    lefts = np.convolve(np.pad(lefts, (2, 2), mode="edge"), kernel, mode="valid")
+    rights = np.convolve(np.pad(rights, (2, 2), mode="edge"), kernel, mode="valid")
+    return [
+        (int(y), int(round(left)), int(round(right)))
+        for y, left, right in zip(ys, lefts, rights)
+    ]
+
+
+def geometry_guided_subject_mask(
+    image: np.ndarray,
+    face_box: Optional[Tuple[int, int, int, int]] = None,
+) -> Optional[np.ndarray]:
+    if face_box is None:
+        face_box = detect_largest_face(image)
+    if face_box is None:
+        return None
+
+    x, y, width, height = face_box
+    image_height, image_width = image.shape[:2]
+    face_center_x = int(x + width / 2)
+    face_center_y = int(y + height / 2)
+    mask = np.zeros((image_height, image_width), dtype=np.float32)
+
+    head_center = (face_center_x, int(face_center_y - height * 0.08))
+    head_axes = (int(width * 0.72), int(height * 1.12))
+    cv2.ellipse(mask, head_center, head_axes, 0, 0, 360, 1.0, -1)
+
+    hair_center = (face_center_x, int(y + height * 0.24))
+    hair_axes = (int(width * 0.86), int(height * 0.62))
+    cv2.ellipse(mask, hair_center, hair_axes, 0, 180, 360, 1.0, -1)
+
+    neck_top = int(y + height * 0.82)
+    neck_bottom = int(y + height * 1.22)
+    neck_half_width = int(width * 0.23)
+    cv2.rectangle(
+        mask,
+        (max(0, face_center_x - neck_half_width), max(0, neck_top)),
+        (min(image_width - 1, face_center_x + neck_half_width), min(image_height - 1, neck_bottom)),
+        1.0,
+        -1,
+    )
+
+    shoulder_y = int(y + height * 1.05)
+    upper_body_y = int(y + height * 1.28)
+    torso_bottom = image_height - 1
+    shoulder_half_width = int(width * 1.16)
+    bottom_half_width = int(width * 1.42)
+    torso = np.array(
+        [
+            [face_center_x - int(width * 0.34), shoulder_y],
+            [face_center_x + int(width * 0.34), shoulder_y],
+            [face_center_x + shoulder_half_width, upper_body_y],
+            [face_center_x + bottom_half_width, torso_bottom],
+            [face_center_x - bottom_half_width, torso_bottom],
+            [face_center_x - shoulder_half_width, upper_body_y],
+        ],
+        dtype=np.int32,
+    )
+    torso[:, 0] = np.clip(torso[:, 0], 0, image_width - 1)
+    torso[:, 1] = np.clip(torso[:, 1], 0, image_height - 1)
+    cv2.fillPoly(mask, [torso], 1.0)
+
+    shoulder_center = (face_center_x, int(y + height * 1.34))
+    shoulder_axes = (int(width * 1.34), int(height * 0.44))
+    cv2.ellipse(mask, shoulder_center, shoulder_axes, 0, 0, 360, 1.0, -1)
+
+    blur_size = max(15, int(min(image_width, image_height) * 0.08))
+    if blur_size % 2 == 0:
+        blur_size += 1
+    mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
+    mask = np.clip(mask / max(float(mask.max()), 1e-6), 0, 1)
+    return clean_subject_mask(mask)
+
+
+def rembg_subject_mask(image: np.ndarray) -> Optional[np.ndarray]:
+    try:
+        from rembg import new_session, remove
+    except ImportError:
+        return None
+
+    global REMBG_SESSION
+    if REMBG_SESSION is None:
+        REMBG_SESSION = new_session("isnet-general-use")
+
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb)
+    image_bytes = io.BytesIO()
+    pil_image.save(image_bytes, format="PNG")
+
+    try:
+        output = remove(
+            image_bytes.getvalue(),
+            session=REMBG_SESSION,
+            only_mask=True,
+            post_process_mask=True,
+        )
+    except Exception:
+        return None
+
+    mask = Image.open(io.BytesIO(output)).convert("L")
+    mask_array = np.asarray(mask, dtype=np.float32) / 255.0
+    return clean_subject_mask(mask_array)
+
+
+def mediapipe_subject_mask(image: np.ndarray) -> Optional[np.ndarray]:
+    try:
+        import mediapipe as mp
+    except ImportError:
+        return None
+
+    global MEDIAPIPE_IMAGE_SEGMENTER
+    if MEDIAPIPE_IMAGE_SEGMENTER is None:
+        ensure_mediapipe_model()
+        options = mp.tasks.vision.ImageSegmenterOptions(
+            base_options=mp.tasks.BaseOptions(model_asset_path=str(MEDIAPIPE_MODEL_PATH)),
+            output_confidence_masks=True,
+            output_category_mask=False,
+        )
+        MEDIAPIPE_IMAGE_SEGMENTER = mp.tasks.vision.ImageSegmenter.create_from_options(
+            options
+        )
+
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    try:
+        result = MEDIAPIPE_IMAGE_SEGMENTER.segment(mp_image)
+    except Exception:
+        return None
+
+    if not result.confidence_masks or len(result.confidence_masks) < 2:
+        return None
+
+    mask = np.asarray(result.confidence_masks[1].numpy_view(), dtype=np.float32)
+    return clean_subject_mask(mask)
+
+
+def ensure_mediapipe_model() -> None:
+    if MEDIAPIPE_MODEL_PATH.exists():
+        return
+
+    MEDIAPIPE_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    urllib.request.urlretrieve(MEDIAPIPE_MODEL_URL, MEDIAPIPE_MODEL_PATH)
+
+
+def clean_subject_mask(mask: np.ndarray) -> np.ndarray:
+    mask_uint8 = (np.clip(mask, 0, 1) * 255).astype(np.uint8)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_CLOSE, kernel, iterations=1)
+    mask_uint8 = cv2.morphologyEx(mask_uint8, cv2.MORPH_OPEN, kernel, iterations=1)
+    mask_uint8 = extend_subject_to_bottom_edge(mask_uint8)
+    mask_float = cv2.GaussianBlur(mask_uint8.astype(np.float32) / 255.0, (7, 7), 0)
+    return np.clip(mask_float, 0, 1)
+
+
+def extend_subject_to_bottom_edge(mask_uint8: np.ndarray) -> np.ndarray:
+    confident = mask_uint8 > 128
+    image_height, image_width = confident.shape
+    start_y = int(image_height * 0.55)
+    bottom_curve = np.full(image_width, np.nan, dtype=np.float32)
+
+    for x in range(image_width):
+        ys = np.flatnonzero(confident[start_y:, x])
+        if ys.size == 0:
+            continue
+        bottom_curve[x] = start_y + float(ys[-1])
+
+    known_x = np.flatnonzero(~np.isnan(bottom_curve))
+    if known_x.size < 2:
+        return mask_uint8
+
+    filled_curve = np.interp(
+        np.arange(image_width),
+        known_x,
+        bottom_curve[known_x],
+    )
+    kernel_width = max(15, int(image_width * 0.09))
+    if kernel_width % 2 == 0:
+        kernel_width += 1
+    kernel = np.hanning(kernel_width).astype(np.float32)
+    kernel /= kernel.sum()
+    padded_curve = np.pad(filled_curve, (kernel_width // 2,), mode="edge")
+    smooth_curve = np.convolve(padded_curve, kernel, mode="valid")
+
+    extension = np.zeros_like(mask_uint8)
+    for x, y in enumerate(smooth_curve):
+        extension_start = int(np.clip(round(y), start_y, image_height - 1))
+        extension[extension_start:, x] = 255
+
+    bottom_kernel_width = max(7, int(image_width * 0.04))
+    if bottom_kernel_width % 2 == 0:
+        bottom_kernel_width += 1
+    bottom_kernel = cv2.getStructuringElement(
+        cv2.MORPH_ELLIPSE,
+        (bottom_kernel_width, 5),
+    )
+    extension = cv2.morphologyEx(extension, cv2.MORPH_CLOSE, bottom_kernel, iterations=1)
+    extension = cv2.GaussianBlur(extension, (9, 9), 0)
+    filled = np.maximum(mask_uint8, extension)
+    return filled
+
 
 
 def apply_white_background(image: np.ndarray, subject_mask: np.ndarray) -> np.ndarray:
     if float(subject_mask.mean()) < 0.05:
         return image
 
-    mask = cv2.GaussianBlur(subject_mask.astype(np.float32), (9, 9), 0)
-    mask = np.clip(mask, 0, 1)[:, :, None]
+    mask = np.clip(subject_mask.astype(np.float32), 0, 1)[:, :, None]
     white = np.full_like(image, 255, dtype=np.float32)
     image_float = image.astype(np.float32)
     result = image_float * mask + white * (1 - mask)

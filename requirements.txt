@@ -6,3 +6,7 @@ flask
 requests
 kagglehub
 opencv-python-headless<5
+rembg
+onnxruntime
+mediapipe
+opencv-contrib-python<5
