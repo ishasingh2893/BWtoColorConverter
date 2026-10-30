@@ -1,220 +1,220 @@
-const form = document.querySelector("#colorize-form");
-const dropzone = document.querySelector("#dropzone");
-const photoInput = document.querySelector("#photo-input");
-const imageUrlInput = document.querySelector("#image-url");
-const emptyRawInput = document.querySelector("#empty-raw-input");
-const rawInputPreview = document.querySelector("#raw-input-preview");
-const emptyProcessedInput = document.querySelector("#empty-processed-input");
-const processedInputPreview = document.querySelector("#processed-input-preview");
-const maskPreviews = {
-  rembg: {
-    image: document.querySelector("#rembg-subject-mask-preview"),
-    empty: document.querySelector("#empty-rembg-subject-mask"),
-  },
-  sobel_rembg: {
-    image: document.querySelector("#sobel-rembg-subject-mask-preview"),
-    empty: document.querySelector("#empty-sobel-rembg-subject-mask"),
-  },
-  mediapipe: {
-    image: document.querySelector("#mediapipe-subject-mask-preview"),
-    empty: document.querySelector("#empty-mediapipe-subject-mask"),
-  },
-  geometry: {
-    image: document.querySelector("#geometry-subject-mask-preview"),
-    empty: document.querySelector("#empty-geometry-subject-mask"),
-  },
-};
-const modelPreviews = {
-  linear_rembg: {
-    image: document.querySelector("#linear-rembg-output-preview"),
-    empty: document.querySelector("#empty-linear-rembg-result"),
-    missing: "Linear model unavailable.",
-  },
-  linear_sobel_rembg: {
-    image: document.querySelector("#linear-sobel-rembg-output-preview"),
-    empty: document.querySelector("#empty-linear-sobel-rembg-result"),
-    missing: "Linear model unavailable.",
-  },
-  linear_mediapipe: {
-    image: document.querySelector("#linear-mediapipe-output-preview"),
-    empty: document.querySelector("#empty-linear-mediapipe-result"),
-    missing: "Linear model unavailable.",
-  },
-  linear_geometry: {
-    image: document.querySelector("#linear-geometry-output-preview"),
-    empty: document.querySelector("#empty-linear-geometry-result"),
-    missing: "Linear model unavailable.",
-  },
-  knn_rembg: {
-    image: document.querySelector("#knn-rembg-output-preview"),
-    empty: document.querySelector("#empty-knn-rembg-result"),
-    missing: "KNN model unavailable.",
-  },
-  knn_sobel_rembg: {
-    image: document.querySelector("#knn-sobel-rembg-output-preview"),
-    empty: document.querySelector("#empty-knn-sobel-rembg-result"),
-    missing: "KNN model unavailable.",
-  },
-  knn_mediapipe: {
-    image: document.querySelector("#knn-mediapipe-output-preview"),
-    empty: document.querySelector("#empty-knn-mediapipe-result"),
-    missing: "KNN model unavailable.",
-  },
-  knn_geometry: {
-    image: document.querySelector("#knn-geometry-output-preview"),
-    empty: document.querySelector("#empty-knn-geometry-result"),
-    missing: "KNN model unavailable.",
-  },
-  hybrid_rembg: {
-    image: document.querySelector("#hybrid-rembg-output-preview"),
-    empty: document.querySelector("#empty-hybrid-rembg-result"),
-    missing: "Hybrid model unavailable.",
-  },
-  hybrid_sobel_rembg: {
-    image: document.querySelector("#hybrid-sobel-rembg-output-preview"),
-    empty: document.querySelector("#empty-hybrid-sobel-rembg-result"),
-    missing: "Hybrid model unavailable.",
-  },
-  hybrid_mediapipe: {
-    image: document.querySelector("#hybrid-mediapipe-output-preview"),
-    empty: document.querySelector("#empty-hybrid-mediapipe-result"),
-    missing: "Hybrid model unavailable.",
-  },
-  hybrid_geometry: {
-    image: document.querySelector("#hybrid-geometry-output-preview"),
-    empty: document.querySelector("#empty-hybrid-geometry-result"),
-    missing: "Hybrid model unavailable.",
-  },
-};
-const statusEl = document.querySelector("#status");
-const resultBadge = document.querySelector("#result-badge");
-const submitButton = document.querySelector("#submit-button");
-
-Object.values(modelPreviews).forEach((preview) => {
-  preview.defaultTitle = preview.empty.querySelector("strong")?.textContent || "";
-});
-
-function setStatus(message, isError = false) {
-  statusEl.textContent = message;
-  statusEl.classList.toggle("error", isError);
+const $ = (selector) => document.querySelector(selector);
+const form = $("#colorize-form");
+const photoInput = $("#photo-input");
+const urlInput = $("#image-url");
+const canvas = $("#crop-canvas");
+const context = canvas.getContext("2d");
+const box = $("#crop-box");
+const zoom = $("#crop-zoom");
+const submit = $("#submit-button");
+const badge = $("#result-badge");
+const guide = JSON.parse($("#crop-calibration").textContent);
+const cx = guide.target_face_center_x * 240;
+const cy = guide.target_face_center_y * 240;
+const radius = guide.target_face_width_ratio * 120;
+for (const [key, value] of Object.entries({ cx, cy, rx: radius, ry: radius })) {
+  $("#face-guide").setAttribute(key, value);
 }
+$("#center-guide").setAttribute("d", `M${cx - 5} ${cy}h10 M${cx} ${cy - 5}v10`);
+let image = null;
+let scale = 1;
+let x = 0;
+let y = 0;
+let drag = null;
+let version = 0;
+let loading = false;
 
-function resetModelPreviews() {
-  Object.values(maskPreviews).forEach(({ image, empty }) => {
-    image.hidden = true;
-    empty.hidden = false;
-  });
-  Object.values(modelPreviews).forEach((preview) => {
-    preview.image.hidden = true;
-    preview.empty.hidden = false;
-    preview.empty.classList.remove("unavailable");
-    const strong = preview.empty.querySelector("strong");
-    if (strong) strong.textContent = preview.defaultTitle;
-  });
+function status(message, error = false) {
+  $("#status").textContent = message;
+  $("#status").classList.toggle("error", error);
 }
-
-function setUnavailablePreviews() {
-  Object.values(modelPreviews).forEach(({ image, empty, missing }) => {
-    image.hidden = true;
-    empty.hidden = false;
-    empty.classList.add("unavailable");
-    const strong = empty.querySelector("strong");
-    if (strong) strong.textContent = missing;
-  });
+function showImage(id, emptyId, src) {
+  $(id).src = src;
+  $(id).hidden = false;
+  $(emptyId).hidden = true;
 }
-
-function previewFile(file) {
-  if (!file) return;
-  rawInputPreview.src = URL.createObjectURL(file);
-  rawInputPreview.hidden = false;
-  emptyRawInput.hidden = true;
-  processedInputPreview.hidden = true;
-  emptyProcessedInput.hidden = false;
-  resetModelPreviews();
-  imageUrlInput.value = "";
-  resultBadge.textContent = "Ready";
+function clearResults() {
+  for (const name of ["processed-input", "linear-output", "knn-output", "hybrid-output"]) {
+    $(`#${name}-preview`).hidden = true;
+  }
+  for (const id of ["processed-input", "linear-result", "knn-result", "hybrid-result"]) {
+    $(`#empty-${id}`).hidden = false;
+  }
 }
-
+function draw(target = context, size = 480) {
+  target.setTransform(size / 240, 0, 0, size / 240, 0, 0);
+  target.fillStyle = "white";
+  target.fillRect(0, 0, 240, 240);
+  if (image) target.drawImage(image, x, y, image.width * scale, image.height * scale);
+}
+function changed() {
+  draw();
+  clearResults();
+  badge.textContent = "Ready to colorize";
+  status("Position the face inside the guide, then colorize.");
+}
+function reset() {
+  zoom.value = "1";
+  $("#zoom-value").textContent = "100%";
+  scale = Math.min(240 / image.width, 240 / image.height);
+  x = (240 - image.width * scale) / 2;
+  y = (240 - image.height * scale) / 2;
+  changed();
+}
+function invalidateSource() {
+  version++;
+  image = null;
+  drag = null;
+  submit.disabled = true;
+  $("#crop-editor").hidden = true;
+  $("#raw-input-preview").hidden = true;
+  $("#empty-raw-input").hidden = false;
+  clearResults();
+  badge.textContent = "Choose a portrait";
+}
+async function prepare(file) {
+  invalidateSource();
+  const current = version;
+  const body = new FormData();
+  if (file) {
+    if (file.size > 12 * 1024 * 1024) {
+      status("Image is too large. Use a file under 12 MB.", true);
+      return;
+    }
+    body.append("photo", file);
+  } else {
+    if (!urlInput.value.trim() || !urlInput.checkValidity()) {
+      status("Enter a valid photo link first.", true);
+      return;
+    }
+    body.append("image_url", urlInput.value.trim());
+  }
+  status("Loading portrait…");
+  try {
+    const response = await fetch("/api/prepare", { method: "POST", body });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Unable to load this portrait.");
+    const loaded = new Image();
+    loaded.src = data.image;
+    await loaded.decode();
+    if (current !== version) return;
+    image = loaded;
+    showImage("#raw-input-preview", "#empty-raw-input", data.image);
+    $("#crop-editor").hidden = false;
+    submit.disabled = false;
+    reset();
+  } catch (error) {
+    if (current === version) status(error.message, true);
+  }
+}
 photoInput.addEventListener("change", () => {
-  previewFile(photoInput.files[0]);
+  if (photoInput.files[0]) {
+    urlInput.value = "";
+    prepare(photoInput.files[0]);
+  }
 });
-
+$("#load-link").addEventListener("click", () => { photoInput.value = ""; prepare(); });
+urlInput.addEventListener("input", () => {
+  photoInput.value = "";
+  invalidateSource();
+  status("Click Load photo link to position this portrait.");
+});
+urlInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") { event.preventDefault(); $("#load-link").click(); }
+});
+const dropzone = $("#dropzone");
 dropzone.addEventListener("dragover", (event) => {
   event.preventDefault();
-  dropzone.classList.add("drag");
+  if (!loading) dropzone.classList.add("drag");
 });
-
-dropzone.addEventListener("dragleave", () => {
-  dropzone.classList.remove("drag");
-});
-
+dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag"));
 dropzone.addEventListener("drop", (event) => {
   event.preventDefault();
   dropzone.classList.remove("drag");
+  if (loading) return;
   const file = event.dataTransfer.files[0];
-  if (!file) return;
-  photoInput.files = event.dataTransfer.files;
-  previewFile(file);
+  if (file) { photoInput.value = ""; urlInput.value = ""; prepare(file); }
 });
-
-imageUrlInput.addEventListener("input", () => {
-  if (!imageUrlInput.value) return;
-  photoInput.value = "";
-  rawInputPreview.src = imageUrlInput.value;
-  rawInputPreview.hidden = false;
-  emptyRawInput.hidden = true;
-  processedInputPreview.hidden = true;
-  emptyProcessedInput.hidden = false;
-  resetModelPreviews();
-  resultBadge.textContent = "Linked";
+box.addEventListener("pointerdown", (event) => {
+  if (!image || loading || (event.pointerType === "mouse" && event.button !== 0)) return;
+  event.preventDefault();
+  box.focus();
+  box.setPointerCapture(event.pointerId);
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
 });
-
+box.addEventListener("pointermove", (event) => {
+  if (!drag || event.pointerId !== drag.id) return;
+  const ratio = 240 / box.getBoundingClientRect().width;
+  x += (event.clientX - drag.x) * ratio;
+  y += (event.clientY - drag.y) * ratio;
+  drag.x = event.clientX;
+  drag.y = event.clientY;
+  changed();
+});
+for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  box.addEventListener(name, () => { drag = null; });
+}
+box.addEventListener("keydown", (event) => {
+  if (!image || loading) return;
+  const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+  if (!delta) return;
+  event.preventDefault();
+  const step = event.shiftKey ? 10 : 1;
+  x += delta[0] * step;
+  y += delta[1] * step;
+  changed();
+});
+zoom.addEventListener("input", () => {
+  if (!image) return;
+  const next = Math.min(240 / image.width, 240 / image.height) * Number(zoom.value);
+  const ratio = next / scale;
+  x = 120 - (120 - x) * ratio;
+  y = 120 - (120 - y) * ratio;
+  scale = next;
+  $("#zoom-value").textContent = `${Math.round(Number(zoom.value) * 100)}%`;
+  changed();
+});
+$("#reset-crop").addEventListener("click", () => { if (image) reset(); });
+$("#show-guide").addEventListener("change", (event) => {
+  $("#crop-guide").hidden = !event.target.checked;
+});
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const body = new FormData(form);
-
-  if (!photoInput.files[0] && !imageUrlInput.value.trim()) {
-    setStatus("Upload a portrait or paste a photo link.", true);
-    return;
-  }
-
-  submitButton.disabled = true;
-  resultBadge.textContent = "Working";
-  setStatus("Colorizing portrait...");
-
+  if (!image || loading) return;
+  loading = true;
+  drag = null;
+  submit.disabled = true;
+  $("#input-controls").disabled = true;
+  badge.textContent = "Working";
+  status("Colorizing your crop…");
   try {
+    const output = document.createElement("canvas");
+    output.width = output.height = 240;
+    draw(output.getContext("2d"), 240);
+    const blob = await new Promise((resolve) => output.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("Unable to create crop. Please try again.");
+    const body = new FormData();
+    body.append("photo", blob, "portrait-crop.png");
+    body.append("manual_crop", "true");
     const response = await fetch("/api/colorize", { method: "POST", body });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Unable to colorize this portrait.");
-
-    if (data.input) {
-      processedInputPreview.src = data.input;
-      processedInputPreview.hidden = false;
-      emptyProcessedInput.hidden = true;
+    showImage("#processed-input-preview", "#empty-processed-input", data.input);
+    for (const name of ["linear", "knn", "hybrid"]) {
+      if (data.outputs[name]) {
+        showImage(`#${name}-output-preview`, `#empty-${name}-result`, data.outputs[name]);
+      } else {
+        $(`#empty-${name}-result strong`).textContent = `${name.toUpperCase()} model unavailable.`;
+      }
     }
-    Object.entries(data.subject_masks || {}).forEach(([key, value]) => {
-      const preview = maskPreviews[key];
-      if (!preview || !value) return;
-      preview.image.src = value;
-      preview.image.hidden = false;
-      preview.empty.hidden = true;
-    });
-
-    setUnavailablePreviews();
-    Object.entries(data.outputs || {}).forEach(([key, value]) => {
-      const preview = modelPreviews[key];
-      if (!preview || !value) return;
-      preview.image.src = value;
-      preview.image.hidden = false;
-      preview.empty.hidden = true;
-      preview.empty.classList.remove("unavailable");
-    });
-    resultBadge.textContent = "Complete";
-    setStatus("Model comparison ready.");
+    badge.textContent = "Complete";
+    status("Model comparison ready. Adjust the crop to try another framing.");
   } catch (error) {
-    resultBadge.textContent = "Needs attention";
-    setStatus(error.message, true);
+    badge.textContent = "Needs attention";
+    status(error.message, true);
   } finally {
-    submitButton.disabled = false;
+    loading = false;
+    submit.disabled = !image;
+    $("#input-controls").disabled = false;
   }
 });

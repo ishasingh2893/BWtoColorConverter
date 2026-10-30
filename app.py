@@ -1,5 +1,6 @@
 import base64
 import mimetypes
+import json
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
@@ -8,13 +9,10 @@ from urllib.parse import urljoin
 
 import requests
 from flask import Flask, jsonify, render_template, request
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from knn_lookup_color_model import colorize as colorize_with_lookup
 from linear_color_model import colorize as colorize_with_linear
-from portrait_preprocess import (
-    crop_face_portrait,
-    save_subject_mask_preview,
-)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -101,104 +99,71 @@ def index():
         "index.html",
         model_ready=LOOKUP_MODEL_PATH.exists() or LINEAR_MODEL_PATH.exists(),
         model_name=", ".join(available_models),
+        crop_guide=json.loads((BASE_DIR / "face_crop_calibration.json").read_text()),
     )
+
+
+@app.errorhandler(413)
+def image_too_large(error):
+    return jsonify({"error": "Image is too large. Use a file under 12 MB."}), 413
+
+
+@app.post("/api/prepare")
+def api_prepare():
+    """Resolve links and normalize orientation before the user positions the image."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="bw_prepare_") as tmp:
+            path = save_request_image(Path(tmp))
+            with Image.open(path) as source:
+                image = ImageOps.exif_transpose(source).convert("RGBA")
+                image.thumbnail((2000, 2000), Image.Resampling.LANCZOS)
+                background = Image.new("RGBA", image.size, "white")
+                background.alpha_composite(image)
+                output = Path(tmp) / "prepared.png"
+                background.convert("RGB").save(output)
+            return jsonify({"image": data_uri(output)})
+    except requests.RequestException:
+        return jsonify({"error": "Could not download the image from that link."}), 400
+    except (ValueError, UnidentifiedImageError, OSError, Image.DecompressionBombError):
+        return jsonify({"error": "Unable to open this image. Choose a PNG, JPG, or WebP portrait."}), 400
 
 
 @app.post("/api/colorize")
 def api_colorize():
     if not LOOKUP_MODEL_PATH.exists() and not LINEAR_MODEL_PATH.exists():
-        return (
-            jsonify(
-                {
-                    "error": (
-                        "Model artifact is missing. Train knn_lookup_color_model.npz "
-                        "or linear_color_model.npz before generating results."
-                    )
-                }
-            ),
-            400,
-        )
+        return jsonify({"error": "Train a color model before generating results."}), 400
 
     try:
         with tempfile.TemporaryDirectory(prefix="bw_colorizer_") as tmp:
             temp_dir = Path(tmp)
+            upload = request.files.get("photo")
+            if not upload or request.form.get("manual_crop") != "true":
+                raise ValueError("Position your portrait in the crop tool before colorizing.")
             input_path = save_request_image(temp_dir)
             portrait_path = temp_dir / "portrait.png"
-            rembg_mask_path = temp_dir / "rembg_subject_mask.png"
-            sobel_rembg_mask_path = temp_dir / "sobel_rembg_subject_mask.png"
-            mediapipe_mask_path = temp_dir / "mediapipe_subject_mask.png"
-            geometry_mask_path = temp_dir / "geometry_subject_mask.png"
-            crop_face_portrait(input_path, portrait_path)
-            save_subject_mask_preview(portrait_path, rembg_mask_path, method="rembg")
-            save_subject_mask_preview(
-                portrait_path,
-                sobel_rembg_mask_path,
-                method="sobel_rembg",
-            )
-            save_subject_mask_preview(
-                portrait_path,
-                mediapipe_mask_path,
-                method="mediapipe",
-            )
-            save_subject_mask_preview(
-                portrait_path,
-                geometry_mask_path,
-                method="geometry",
-            )
-            mask_paths = (
-                ("rembg", rembg_mask_path),
-                ("sobel_rembg", sobel_rembg_mask_path),
-                ("mediapipe", mediapipe_mask_path),
-                ("geometry", geometry_mask_path),
-            )
+            with Image.open(input_path) as image:
+                if image.size != (240, 240):
+                    raise ValueError("The crop must be 240 × 240 pixels. Please use the crop tool.")
+                image.convert("RGB").save(portrait_path)
+
+            # The entire manually aligned frame is foreground. Supplying this mask
+            # also prevents hybrid KNN from invoking its automatic face detector.
+            mask_path = temp_dir / "full_frame.png"
+            Image.new("L", (240, 240), 255).save(mask_path)
             outputs = {}
-
             if LINEAR_MODEL_PATH.exists():
-                for mask_name, mask_path in mask_paths:
-                    linear_output_path = temp_dir / f"linear_{mask_name}.png"
-                    colorize_with_linear(
-                        portrait_path,
-                        LINEAR_MODEL_PATH,
-                        linear_output_path,
-                        mask_path,
-                    )
-                    outputs[f"linear_{mask_name}"] = data_uri(linear_output_path)
-
+                output = temp_dir / "linear.png"
+                colorize_with_linear(portrait_path, LINEAR_MODEL_PATH, output, mask_path)
+                outputs["linear"] = data_uri(output)
             if LOOKUP_MODEL_PATH.exists():
-                for mask_name, mask_path in mask_paths:
-                    knn_output_path = temp_dir / f"knn_{mask_name}.png"
-                    hybrid_output_path = temp_dir / f"hybrid_{mask_name}.png"
+                for name, hybrid in (("knn", False), ("hybrid", True)):
+                    output = temp_dir / f"{name}.png"
                     colorize_with_lookup(
-                        portrait_path,
-                        LOOKUP_MODEL_PATH,
-                        knn_output_path,
-                        use_hybrid=False,
-                        subject_mask_path=mask_path,
+                        portrait_path, LOOKUP_MODEL_PATH, output,
+                        use_hybrid=hybrid, subject_mask_path=mask_path,
                     )
-                    colorize_with_lookup(
-                        portrait_path,
-                        LOOKUP_MODEL_PATH,
-                        hybrid_output_path,
-                        use_hybrid=True,
-                        subject_mask_path=mask_path,
-                    )
-                    outputs[f"knn_{mask_name}"] = data_uri(knn_output_path)
-                    outputs[f"hybrid_{mask_name}"] = data_uri(hybrid_output_path)
-
-            return jsonify(
-                {
-                    "input": data_uri(portrait_path),
-                    "subject_masks": {
-                        "rembg": data_uri(rembg_mask_path),
-                        "sobel_rembg": data_uri(sobel_rembg_mask_path),
-                        "mediapipe": data_uri(mediapipe_mask_path),
-                        "geometry": data_uri(geometry_mask_path),
-                    },
-                    "outputs": outputs,
-                }
-            )
-    except requests.RequestException:
-        return jsonify({"error": "Could not download the image from that link."}), 400
+                    outputs[name] = data_uri(output)
+            return jsonify({"input": data_uri(portrait_path), "outputs": outputs})
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

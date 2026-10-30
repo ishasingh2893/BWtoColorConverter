@@ -32,8 +32,8 @@
           <p class="eyebrow">PORTRAITS, REIMAGINED IN COLOR</p>
           <h1>From black and white to <em>remembered color.</em></h1>
           <p class="intro">
-            Upload a face portrait or paste a photo link. The model keeps the portrait structure
-            and predicts compact LAB color channels from learned training patterns.
+            Upload a face portrait or paste a photo link, then move and zoom the image
+            until the face fits the training guide.
           </p>
         </div>
         <span class="edition">02 / IMAGE COLORIZATION</span>
@@ -58,6 +58,7 @@
 
       <section class="workspace" aria-label="Portrait colorization workspace">
         <form class="input-panel" id="colorize-form">
+          <fieldset id="input-controls">
           <p class="eyebrow">01 / INPUT</p>
           <h2>Choose a portrait.</h2>
 
@@ -81,8 +82,29 @@
             />
           </label>
 
+          <button type="button" class="secondary-button" id="load-link">Load photo link</button>
+
+          <section id="crop-editor" class="crop-editor" hidden aria-label="Position portrait">
+            <h3>Fit the face to the guide.</h3>
+            <p id="crop-help">Drag to position. Use the slider to zoom. Match the face, from forehead to chin, to the oval. White space outside the photo becomes padding.</p>
+            <div class="crop-box" id="crop-box" tabindex="0" role="application" aria-label="Portrait crop. Use arrow keys to move the image; hold Shift for larger steps." aria-describedby="crop-help">
+              <canvas id="crop-canvas" width="480" height="480"></canvas>
+              <svg id="crop-guide" viewBox="0 0 240 240" aria-hidden="true">
+                <ellipse id="face-guide" />
+                <path id="center-guide" />
+              </svg>
+            </div>
+            <label class="zoom-control" for="crop-zoom">Zoom <output id="zoom-value">100%</output></label>
+            <input id="crop-zoom" type="range" min="0.25" max="4" step="0.01" value="1" />
+            <div class="crop-tools">
+              <button type="button" class="secondary-button" id="reset-crop">Reset position</button>
+              <label><input type="checkbox" id="show-guide" checked /> Show face guide</label>
+            </div>
+            <small>The guide uses the training set’s typical face size and position. The square is your final crop.</small>
+          </section>
+          </fieldset>
           <div class="actions">
-            <button type="submit" id="submit-button">Colorize portrait <span>→</span></button>
+            <button type="submit" id="submit-button" disabled>Colorize portrait <span>→</span></button>
           </div>
 
           <p class="status" id="status" role="status"></p>
@@ -108,139 +130,35 @@
             </figure>
             <figure>
               <div class="empty-result" id="empty-processed-input">
-                <strong>Processed input appears here.</strong>
-                <small>Face crop, padding, and 240x240 positioning.</small>
+                <strong>Your crop appears here.</strong>
+                <small>Your chosen 240 × 240 frame.</small>
               </div>
-              <img id="processed-input-preview" alt="Preprocessed portrait preview" hidden />
-              <figcaption>Processed input</figcaption>
-            </figure>
-            <figure>
-              <div class="empty-result" id="empty-rembg-subject-mask">
-                <strong>rembg mask appears here.</strong>
-                <small>rembg foreground/background separation.</small>
-              </div>
-              <img id="rembg-subject-mask-preview" alt="rembg subject mask preview" hidden />
-              <figcaption>rembg mask</figcaption>
-            </figure>
-            <figure>
-              <div class="empty-result" id="empty-sobel-rembg-subject-mask">
-                <strong>Sobel + rembg mask appears here.</strong>
-                <small>rembg mask refined with Sobel outer edges.</small>
-              </div>
-              <img id="sobel-rembg-subject-mask-preview" alt="Sobel and rembg subject mask preview" hidden />
-              <figcaption>Sobel + rembg mask</figcaption>
-            </figure>
-            <figure>
-              <div class="empty-result" id="empty-mediapipe-subject-mask">
-                <strong>MediaPipe mask appears here.</strong>
-                <small>Selfie segmentation foreground mask.</small>
-              </div>
-              <img id="mediapipe-subject-mask-preview" alt="MediaPipe subject mask preview" hidden />
-              <figcaption>MediaPipe mask</figcaption>
-            </figure>
-            <figure>
-              <div class="empty-result" id="empty-geometry-subject-mask">
-                <strong>Geometry mask appears here.</strong>
-                <small>Face-guided head and torso prior.</small>
-              </div>
-              <img id="geometry-subject-mask-preview" alt="Geometry-guided subject mask preview" hidden />
-              <figcaption>Geometry mask</figcaption>
+              <img id="processed-input-preview" alt="Manually cropped portrait preview" hidden />
+              <figcaption>Your crop</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-linear-rembg-result">
-                <strong>Linear rembg output appears here.</strong>
+              <div class="empty-result" id="empty-linear-result">
+                <strong>Linear output appears here.</strong>
                 <small>Pixel-wise regression.</small>
               </div>
-              <img id="linear-rembg-output-preview" alt="Linear regression colorized portrait output using rembg mask" hidden />
-              <figcaption>Linear / rembg</figcaption>
+              <img id="linear-output-preview" alt="Linear regression colorized portrait output" hidden />
+              <figcaption>Linear</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-linear-sobel-rembg-result">
-                <strong>Linear Sobel + rembg output appears here.</strong>
-                <small>Pixel-wise regression.</small>
-              </div>
-              <img id="linear-sobel-rembg-output-preview" alt="Linear regression colorized portrait output using Sobel and rembg mask" hidden />
-              <figcaption>Linear / Sobel + rembg</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-linear-mediapipe-result">
-                <strong>Linear MediaPipe output appears here.</strong>
-                <small>Pixel-wise regression.</small>
-              </div>
-              <img id="linear-mediapipe-output-preview" alt="Linear regression colorized portrait output using MediaPipe mask" hidden />
-              <figcaption>Linear / MediaPipe</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-linear-geometry-result">
-                <strong>Linear geometry output appears here.</strong>
-                <small>Pixel-wise regression.</small>
-              </div>
-              <img id="linear-geometry-output-preview" alt="Linear regression colorized portrait output using geometry mask" hidden />
-              <figcaption>Linear / Geometry</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-knn-rembg-result">
-                <strong>KNN rembg output appears here.</strong>
+              <div class="empty-result" id="empty-knn-result">
+                <strong>KNN output appears here.</strong>
                 <small>Pixel and brightness lookup.</small>
               </div>
-              <img id="knn-rembg-output-preview" alt="KNN colorized portrait output using rembg mask" hidden />
-              <figcaption>KNN / rembg</figcaption>
+              <img id="knn-output-preview" alt="KNN colorized portrait output" hidden />
+              <figcaption>KNN</figcaption>
             </figure>
             <figure class="result-frame">
-              <div class="empty-result" id="empty-knn-sobel-rembg-result">
-                <strong>KNN Sobel + rembg output appears here.</strong>
-                <small>Pixel and brightness lookup.</small>
-              </div>
-              <img id="knn-sobel-rembg-output-preview" alt="KNN colorized portrait output using Sobel and rembg mask" hidden />
-              <figcaption>KNN / Sobel + rembg</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-knn-mediapipe-result">
-                <strong>KNN MediaPipe output appears here.</strong>
-                <small>Pixel and brightness lookup.</small>
-              </div>
-              <img id="knn-mediapipe-output-preview" alt="KNN colorized portrait output using MediaPipe mask" hidden />
-              <figcaption>KNN / MediaPipe</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-knn-geometry-result">
-                <strong>KNN geometry output appears here.</strong>
-                <small>Pixel and brightness lookup.</small>
-              </div>
-              <img id="knn-geometry-output-preview" alt="KNN colorized portrait output using geometry mask" hidden />
-              <figcaption>KNN / Geometry</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-hybrid-rembg-result">
-                <strong>Hybrid rembg output appears here.</strong>
+              <div class="empty-result" id="empty-hybrid-result">
+                <strong>Hybrid output appears here.</strong>
                 <small>KNN with foreground fallback.</small>
               </div>
-              <img id="hybrid-rembg-output-preview" alt="Hybrid colorized portrait output using rembg mask" hidden />
-              <figcaption>Hybrid / rembg</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-hybrid-sobel-rembg-result">
-                <strong>Hybrid Sobel + rembg output appears here.</strong>
-                <small>KNN with foreground fallback.</small>
-              </div>
-              <img id="hybrid-sobel-rembg-output-preview" alt="Hybrid colorized portrait output using Sobel and rembg mask" hidden />
-              <figcaption>Hybrid / Sobel + rembg</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-hybrid-mediapipe-result">
-                <strong>Hybrid MediaPipe output appears here.</strong>
-                <small>KNN with foreground fallback.</small>
-              </div>
-              <img id="hybrid-mediapipe-output-preview" alt="Hybrid colorized portrait output using MediaPipe mask" hidden />
-              <figcaption>Hybrid / MediaPipe</figcaption>
-            </figure>
-            <figure class="result-frame">
-              <div class="empty-result" id="empty-hybrid-geometry-result">
-                <strong>Hybrid geometry output appears here.</strong>
-                <small>KNN with foreground fallback.</small>
-              </div>
-              <img id="hybrid-geometry-output-preview" alt="Hybrid colorized portrait output using geometry mask" hidden />
-              <figcaption>Hybrid / Geometry</figcaption>
+              <img id="hybrid-output-preview" alt="Hybrid colorized portrait output" hidden />
+              <figcaption>Hybrid</figcaption>
             </figure>
           </div>
         </section>
@@ -277,6 +195,7 @@
       </footer>
     </main>
 
+    <script id="crop-calibration" type="application/json">{{ crop_guide | tojson }}</script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

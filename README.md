@@ -74,5 +74,21 @@ python3 app.py
 
 Open `http://127.0.0.1:5000`.
 
+Upload a portrait or load a photo link, then drag the image inside the square
+and adjust the zoom slider to align the face with the guide. Arrow keys move
+the image; Shift + arrow keys move it farther. Reset restores the initial fit.
+The guide uses the target face size and center in `face_crop_calibration.json`.
+White space outside the photo becomes white padding.
+
+Colorization uses exactly the chosen 240 × 240 crop for linear, KNN, and hybrid
+outputs. The website does not automatically detect, recrop, or segment the face.
+The guide is an alignment aid and is never included in the submitted image.
+
+Run the manual crop integration checks (with the model artifacts present):
+
+```sh
+.venv/bin/python -m unittest discover -s tests
+```
+
 The web app requires `linear_color_model.npz`. If that file is missing, the UI
 will load but colorization requests will show a model-artifact error.
