@@ -512,7 +512,7 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
   position: relative;
   width: 100%;
   aspect-ratio: 1;
-  overflow: hidden;
+  overflow: visible;
   background: white;
   border: 1px solid #799281;
   border-radius: 6px;
@@ -521,10 +521,8 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 }
 .crop-box:active { cursor: grabbing; }
 .crop-box:focus-visible { outline: 3px solid #649331; outline-offset: 3px; }
-.crop-box canvas, .crop-box svg { display: block; width: 100%; height: 100%; }
-.crop-box svg { position: absolute; inset: 0; pointer-events: none; }
-#face-guide { fill: none; stroke: #c7f36b; stroke-width: 1.5; stroke-dasharray: 5 3; filter: drop-shadow(0 0 1px #14211b); }
-#center-guide { fill: none; stroke: #c7f36b; stroke-width: 1; }
+.crop-box canvas, .crop-box #crop-guide { display: block; width: 100%; height: 100%; }
+.crop-box #crop-guide { position: absolute; inset: 0; pointer-events: none; user-select: none; }
 .zoom-control { display: flex; justify-content: space-between; margin-top: 16px; font-size: 14px; }
 #crop-zoom { width: 100%; accent-color: var(--green); }
 .crop-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 4px 0 12px; font-size: 13px; }
@@ -532,3 +530,21 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .portrait-stage img, .empty-result { aspect-ratio: 1; object-fit: contain; }
 fieldset:disabled .crop-box { cursor: wait; opacity: 0.7; }
 button:disabled { cursor: not-allowed; }
+.neck-handle {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 2px solid white;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 2px var(--lime), 0 2px 6px #14211b80;
+  transform: translate(-50%, -50%);
+  cursor: move;
+  touch-action: none;
+}
+.neck-handle::after { content: "+"; display: block; color: white; font-size: 21px; line-height: 24px; }
+.neck-handle:focus-visible { outline: 3px solid white; outline-offset: 4px; }
+#neck-help { font-size: 12px; margin-bottom: 8px; }
+.shoulder-handle { border-radius: 50%; background: var(--lime); box-shadow: 0 0 0 2px var(--green), 0 2px 6px #14211b80; }
+.shoulder-handle::after { color: var(--green); }

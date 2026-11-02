@@ -85,22 +85,34 @@
           <button type="button" class="secondary-button" id="load-link">Load photo link</button>
 
           <section id="crop-editor" class="crop-editor" hidden aria-label="Position portrait">
-            <h3>Fit the face to the guide.</h3>
-            <p id="crop-help">Drag to position. Use the slider to zoom. Match the face, from forehead to chin, to the oval. White space outside the photo becomes padding.</p>
+            <h3>Fit the outline around your portrait.</h3>
+            <p id="crop-help">Drag to position and zoom to fit your whole head inside the outline. Align your neck and the tops of your shoulders with the lower part of the guide. Leave the small gap above your hair. Adjust the head, cheek, and neck points, then slide the two lower corner points along the frame edge to fit your shoulders.</p>
             <div class="crop-box" id="crop-box" tabindex="0" role="application" aria-label="Portrait crop. Use arrow keys to move the image; hold Shift for larger steps." aria-describedby="crop-help">
               <canvas id="crop-canvas" width="480" height="480"></canvas>
               <svg id="crop-guide" viewBox="0 0 240 240" aria-hidden="true">
-                <ellipse id="face-guide" />
-                <path id="center-guide" />
+                <path id="guide-shade" fill="#14211b" fill-opacity="0.45" fill-rule="evenodd" />
+                <path id="guide-outline-shadow" fill="none" stroke="#14211b" stroke-opacity="0.65" stroke-width="2.6" />
+                <path id="guide-outline" fill="none" stroke="#c7f36b" stroke-width="1.2" />
               </svg>
+              <button type="button" class="neck-handle" id="neck-left" aria-label="Adjust left neck outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="neck-right" aria-label="Adjust right neck outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle shoulder-handle" id="shoulder-left" aria-label="Adjust left shoulder endpoint along the frame edge. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle shoulder-handle" id="shoulder-right" aria-label="Adjust right shoulder endpoint along the frame edge. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="head-left" aria-label="Adjust left head outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="head-right" aria-label="Adjust right head outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="cheek-left" aria-label="Adjust left cheek outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="cheek-right" aria-label="Adjust right cheek outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
+              <button type="button" class="neck-handle" id="crown-top" aria-label="Adjust top of head outline. Drag or use arrow keys." aria-describedby="neck-help"></button>
             </div>
+            <p id="neck-help">Use the seven points at the crown and along the head, cheeks, and neck to fit the silhouette. The two lower circles start at the frame corners. Slide them along the bottom or side edges to set where each shoulder meets the frame. Drag elsewhere to move the photo.</p>
             <label class="zoom-control" for="crop-zoom">Zoom <output id="zoom-value">100%</output></label>
             <input id="crop-zoom" type="range" min="0.25" max="4" step="0.01" value="1" />
             <div class="crop-tools">
-              <button type="button" class="secondary-button" id="reset-crop">Reset position</button>
-              <label><input type="checkbox" id="show-guide" checked /> Show face guide</label>
+              <button type="button" class="secondary-button" id="reset-crop">Reset all</button>
+              <button type="button" class="secondary-button" id="reset-neck">Reset outline</button>
+              <label><input type="checkbox" id="show-guide" checked /> Show portrait guide</label>
             </div>
-            <small>The guide uses the training set’s typical face size and position. The square is your final crop.</small>
+            <small>The outline follows the typical head-and-shoulder silhouette of 200 training portraits. The square is your final crop; the shaded guide is not included.</small>
           </section>
           </fieldset>
           <div class="actions">
@@ -195,7 +207,8 @@
       </footer>
     </main>
 
-    <script id="crop-calibration" type="application/json">{{ crop_guide | tojson }}</script>
+    <script id="portrait-guide-data" type="application/json">{{ portrait_guide | tojson }}</script>
+    <script src="{{ url_for('static', filename='portrait-boundary.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

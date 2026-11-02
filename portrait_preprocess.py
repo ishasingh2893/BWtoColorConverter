@@ -11,6 +11,9 @@ from PIL import Image
 
 IMAGE_SIZE = (240, 240)
 CALIBRATION_PATH = Path(__file__).resolve().parent / "face_crop_calibration.json"
+OUTER_LAYER_CALIBRATION_PATH = (
+    Path(__file__).resolve().parent / "outer_layer_calibration.json"
+)
 MEDIAPIPE_MODEL_PATH = Path(__file__).resolve().parent / "models" / "selfie_segmenter.tflite"
 MEDIAPIPE_MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
@@ -23,6 +26,7 @@ MIN_TOP_MARGIN_FACE_RATIO = 0.65
 EDGE_REFINEMENT_STEPS = 7
 REMBG_SESSION = None
 MEDIAPIPE_IMAGE_SEGMENTER = None
+OUTER_LAYER_CALIBRATION = None
 
 
 def load_crop_calibration() -> Tuple[float, float, float]:
@@ -35,6 +39,24 @@ def load_crop_calibration() -> Tuple[float, float, float]:
         float(data.get("target_face_center_x", TARGET_FACE_CENTER_X)),
         float(data.get("target_face_center_y", TARGET_FACE_CENTER_Y)),
     )
+
+
+def load_outer_layer_calibration() -> Optional[dict]:
+    global OUTER_LAYER_CALIBRATION
+
+    if OUTER_LAYER_CALIBRATION is not None:
+        return OUTER_LAYER_CALIBRATION
+    if not OUTER_LAYER_CALIBRATION_PATH.exists():
+        return None
+
+    data = json.loads(OUTER_LAYER_CALIBRATION_PATH.read_text())
+    has_row_model = {"face_y_ratios", "left_x_ratios", "right_x_ratios"}.issubset(data)
+    has_parametric_model = data.get("shape_type") == "oval_shoulders" and "parameters" in data
+    if not has_row_model and not has_parametric_model:
+        return None
+
+    OUTER_LAYER_CALIBRATION = data
+    return OUTER_LAYER_CALIBRATION
 
 
 def load_image_for_cv(input_path: Path) -> np.ndarray:
@@ -940,6 +962,10 @@ def geometry_guided_subject_mask(
     if face_box is None:
         return None
 
+    learned_mask = learned_outer_layer_subject_mask(image, face_box)
+    if learned_mask is not None:
+        return learned_mask
+
     x, y, width, height = face_box
     image_height, image_width = image.shape[:2]
     face_center_x = int(x + width / 2)
@@ -990,6 +1016,147 @@ def geometry_guided_subject_mask(
     cv2.ellipse(mask, shoulder_center, shoulder_axes, 0, 0, 360, 1.0, -1)
 
     blur_size = max(15, int(min(image_width, image_height) * 0.08))
+    if blur_size % 2 == 0:
+        blur_size += 1
+    mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
+    mask = np.clip(mask / max(float(mask.max()), 1e-6), 0, 1)
+    return clean_subject_mask(mask)
+
+
+def learned_outer_layer_subject_mask(
+    image: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+) -> Optional[np.ndarray]:
+    calibration = load_outer_layer_calibration()
+    if calibration is None:
+        return None
+    if calibration.get("shape_type") == "oval_shoulders":
+        return learned_oval_shoulder_subject_mask(image, face_box, calibration)
+
+    y_ratios = np.asarray(calibration["face_y_ratios"], dtype=np.float32)
+    left_ratios = np.asarray(calibration["left_x_ratios"], dtype=np.float32)
+    right_ratios = np.asarray(calibration["right_x_ratios"], dtype=np.float32)
+    if y_ratios.size < 3 or y_ratios.size != left_ratios.size or y_ratios.size != right_ratios.size:
+        return None
+
+    x, y, width, height = face_box
+    image_height, image_width = image.shape[:2]
+    face_size = max(width, height)
+    face_center_x = x + width / 2
+
+    left_points = []
+    right_points = []
+    for y_ratio, left_ratio, right_ratio in zip(y_ratios, left_ratios, right_ratios):
+        row_y = int(round(y + float(y_ratio) * face_size))
+        if row_y < 0 or row_y >= image_height:
+            continue
+
+        left_x = int(round(face_center_x + float(left_ratio) * face_size))
+        right_x = int(round(face_center_x + float(right_ratio) * face_size))
+        left_x = int(np.clip(left_x, 0, image_width - 1))
+        right_x = int(np.clip(right_x, 0, image_width - 1))
+        if right_x - left_x < max(4, int(face_size * 0.08)):
+            continue
+
+        left_points.append((left_x, row_y))
+        right_points.append((right_x, row_y))
+
+    if len(left_points) < 3 or len(right_points) < 3:
+        return None
+
+    mask = np.zeros((image_height, image_width), dtype=np.float32)
+    polygon = np.array(left_points + list(reversed(right_points)), dtype=np.int32)
+    cv2.fillPoly(mask, [polygon], 1.0)
+
+    face_left = max(0, int(x - width * 0.06))
+    face_top = max(0, int(y - height * 0.08))
+    face_right = min(image_width, int(x + width * 1.06))
+    face_bottom = min(image_height, int(y + height * 1.10))
+    mask[face_top:face_bottom, face_left:face_right] = 1.0
+
+    blur_size = max(9, int(min(image_width, image_height) * 0.045))
+    if blur_size % 2 == 0:
+        blur_size += 1
+    mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)
+    mask = np.clip(mask / max(float(mask.max()), 1e-6), 0, 1)
+    return clean_subject_mask(mask)
+
+
+def learned_oval_shoulder_subject_mask(
+    image: np.ndarray,
+    face_box: Tuple[int, int, int, int],
+    calibration: dict,
+) -> Optional[np.ndarray]:
+    params = calibration.get("parameters", {})
+    required = {
+        "head_center_y_ratio",
+        "head_axis_x_ratio",
+        "head_axis_y_ratio",
+        "neck_top_ratio",
+        "neck_bottom_ratio",
+        "neck_half_width_ratio",
+        "shoulder_start_y_ratio",
+        "shoulder_end_y_ratio",
+        "shoulder_half_width_ratio",
+        "torso_bottom_half_width_ratio",
+    }
+    if not required.issubset(params):
+        return None
+
+    x, y, width, height = face_box
+    image_height, image_width = image.shape[:2]
+    face_size = max(width, height)
+    face_center_x = int(round(x + width / 2))
+    mask = np.zeros((image_height, image_width), dtype=np.float32)
+
+    head_center = (
+        face_center_x,
+        int(round(y + float(params["head_center_y_ratio"]) * face_size)),
+    )
+    head_axes = (
+        int(round(float(params["head_axis_x_ratio"]) * face_size)),
+        int(round(float(params["head_axis_y_ratio"]) * face_size)),
+    )
+    cv2.ellipse(mask, head_center, head_axes, 0, 0, 360, 1.0, -1)
+
+    neck_top = int(round(y + float(params["neck_top_ratio"]) * face_size))
+    neck_bottom = int(round(y + float(params["neck_bottom_ratio"]) * face_size))
+    neck_half_width = int(round(float(params["neck_half_width_ratio"]) * face_size))
+    cv2.rectangle(
+        mask,
+        (max(0, face_center_x - neck_half_width), max(0, neck_top)),
+        (
+            min(image_width - 1, face_center_x + neck_half_width),
+            min(image_height - 1, neck_bottom),
+        ),
+        1.0,
+        -1,
+    )
+
+    shoulder_start_y = int(round(y + float(params["shoulder_start_y_ratio"]) * face_size))
+    shoulder_end_y = int(round(y + float(params["shoulder_end_y_ratio"]) * face_size))
+    shoulder_half_width = int(round(float(params["shoulder_half_width_ratio"]) * face_size))
+    torso_bottom_half_width = int(
+        round(float(params["torso_bottom_half_width_ratio"]) * face_size)
+    )
+    neck_join_half_width = int(round(float(params["neck_half_width_ratio"]) * 1.28 * face_size))
+    torso_bottom = image_height - 1
+    torso = np.array(
+        [
+            [face_center_x - neck_join_half_width, shoulder_start_y],
+            [face_center_x + neck_join_half_width, shoulder_start_y],
+            [face_center_x + shoulder_half_width, shoulder_end_y],
+            [face_center_x + torso_bottom_half_width, torso_bottom],
+            [face_center_x - torso_bottom_half_width, torso_bottom],
+            [face_center_x - shoulder_half_width, shoulder_end_y],
+        ],
+        dtype=np.int32,
+    )
+    torso[:, 0] = np.clip(torso[:, 0], 0, image_width - 1)
+    torso[:, 1] = np.clip(torso[:, 1], 0, image_height - 1)
+    cv2.fillPoly(mask, [torso], 1.0)
+
+    blur_size = max(9, int(min(image_width, image_height) * 0.04))
     if blur_size % 2 == 0:
         blur_size += 1
     mask = cv2.GaussianBlur(mask, (blur_size, blur_size), 0)

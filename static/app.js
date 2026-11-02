@@ -8,14 +8,6 @@ const box = $("#crop-box");
 const zoom = $("#crop-zoom");
 const submit = $("#submit-button");
 const badge = $("#result-badge");
-const guide = JSON.parse($("#crop-calibration").textContent);
-const cx = guide.target_face_center_x * 240;
-const cy = guide.target_face_center_y * 240;
-const radius = guide.target_face_width_ratio * 120;
-for (const [key, value] of Object.entries({ cx, cy, rx: radius, ry: radius })) {
-  $("#face-guide").setAttribute(key, value);
-}
-$("#center-guide").setAttribute("d", `M${cx - 5} ${cy}h10 M${cx} ${cy - 5}v10`);
 let image = null;
 let scale = 1;
 let x = 0;
@@ -23,6 +15,27 @@ let y = 0;
 let drag = null;
 let version = 0;
 let loading = false;
+const guideData = JSON.parse($("#portrait-guide-data").textContent);
+const outlineHandles = [$("#neck-left"), $("#neck-right"), $("#shoulder-left"), $("#shoulder-right"), $("#head-left"), $("#head-right"), $("#cheek-left"), $("#cheek-right"), $("#crown-top")];
+let outlineOffsets = guideData.anchors.map(() => ({ x: 0, y: 0 }));
+const cropSurface = document.createElement("canvas");
+cropSurface.width = cropSurface.height = 240;
+const cropContext = cropSurface.getContext("2d", { willReadFrequently: true });
+function updateOutlineHandles() {
+  outlineHandles.forEach((handle, i) => {
+    handle.style.left = `${(guideData.anchors[i].x + outlineOffsets[i].x) / 2.4}%`;
+    handle.style.top = `${(guideData.anchors[i].y + outlineOffsets[i].y) / 2.4}%`;
+  });
+  const outline = PortraitBoundary.path(PortraitBoundary.contour(guideData.points, guideData.anchors, outlineOffsets));
+  $("#guide-shade").setAttribute("d", `M0 0H240V240H0Z ${outline} L240 240H0Z`);
+  $("#guide-outline-shadow").setAttribute("d", outline);
+  $("#guide-outline").setAttribute("d", outline);
+}
+function resetOutline() {
+  outlineOffsets = guideData.anchors.map(() => ({ x: 0, y: 0 }));
+  updateOutlineHandles();
+}
+updateOutlineHandles();
 
 function status(message, error = false) {
   $("#status").textContent = message;
@@ -42,18 +55,22 @@ function clearResults() {
   }
 }
 function draw(target = context, size = 480) {
-  target.setTransform(size / 240, 0, 0, size / 240, 0, 0);
-  target.fillStyle = "white";
-  target.fillRect(0, 0, 240, 240);
-  if (image) target.drawImage(image, x, y, image.width * scale, image.height * scale);
+  cropContext.setTransform(1, 0, 0, 1, 0, 0);
+  cropContext.fillStyle = "white";
+  cropContext.fillRect(0, 0, 240, 240);
+  if (image) cropContext.drawImage(image, x, y, image.width * scale, image.height * scale);
+  target.setTransform(1, 0, 0, 1, 0, 0);
+  target.clearRect(0, 0, size, size);
+  target.drawImage(cropSurface, 0, 0, size, size);
 }
 function changed() {
   draw();
   clearResults();
   badge.textContent = "Ready to colorize";
-  status("Position the face inside the guide, then colorize.");
+  status("Position the portrait, then drag the outline points to fit the outline around it.");
 }
 function reset() {
+  resetOutline();
   zoom.value = "1";
   $("#zoom-value").textContent = "100%";
   scale = Math.min(240 / image.width, 240 / image.height);
@@ -138,15 +155,23 @@ dropzone.addEventListener("drop", (event) => {
 box.addEventListener("pointerdown", (event) => {
   if (!image || loading || (event.pointerType === "mouse" && event.button !== 0)) return;
   event.preventDefault();
-  box.focus();
+  const neck = outlineHandles.indexOf(event.target);
+  if (neck >= 0) outlineHandles[neck].focus();
+  else box.focus();
   box.setPointerCapture(event.pointerId);
-  drag = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, neck };
 });
 box.addEventListener("pointermove", (event) => {
   if (!drag || event.pointerId !== drag.id) return;
   const ratio = 240 / box.getBoundingClientRect().width;
-  x += (event.clientX - drag.x) * ratio;
-  y += (event.clientY - drag.y) * ratio;
+  const dx = (event.clientX - drag.x) * ratio;
+  const dy = (event.clientY - drag.y) * ratio;
+  if (drag.neck >= 0) {
+    moveOutline(drag.neck, dx, dy);
+  } else {
+    x += dx;
+    y += dy;
+  }
   drag.x = event.clientX;
   drag.y = event.clientY;
   changed();
@@ -155,6 +180,7 @@ for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
   box.addEventListener(name, () => { drag = null; });
 }
 box.addEventListener("keydown", (event) => {
+  if (outlineHandles.includes(event.target)) return;
   if (!image || loading) return;
   const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
   if (!delta) return;
@@ -174,9 +200,32 @@ zoom.addEventListener("input", () => {
   $("#zoom-value").textContent = `${Math.round(Number(zoom.value) * 100)}%`;
   changed();
 });
+function moveOutline(index, dx, dy) {
+  outlineOffsets[index] = index === 2 || index === 3
+    ? PortraitBoundary.edgeOffset(index, dx, dy, outlineOffsets, guideData.anchors)
+    : PortraitBoundary.controlOffset(index, dx, dy, outlineOffsets, guideData.anchors,
+      Math.min(...guideData.points.map((point) => point.y)));
+  updateOutlineHandles();
+}
+outlineHandles.forEach((handle, index) => {
+  handle.addEventListener("keydown", (event) => {
+    if (!image || loading) return;
+    const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const step = event.shiftKey ? 5 : 1;
+    moveOutline(index, delta[0] * step, delta[1] * step);
+    changed();
+  });
+});
+$("#reset-neck").addEventListener("click", () => {
+  if (image && !loading) { resetOutline(); changed(); }
+});
 $("#reset-crop").addEventListener("click", () => { if (image) reset(); });
 $("#show-guide").addEventListener("change", (event) => {
   $("#crop-guide").hidden = !event.target.checked;
+  outlineHandles.forEach((handle) => { handle.hidden = !event.target.checked; });
 });
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

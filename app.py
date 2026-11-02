@@ -99,7 +99,7 @@ def index():
         "index.html",
         model_ready=LOOKUP_MODEL_PATH.exists() or LINEAR_MODEL_PATH.exists(),
         model_name=", ".join(available_models),
-        crop_guide=json.loads((BASE_DIR / "face_crop_calibration.json").read_text()),
+        portrait_guide=json.loads((BASE_DIR / "static" / "portrait-guide.json").read_text()),
     )
 
 

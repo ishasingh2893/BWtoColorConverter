@@ -76,8 +76,17 @@ Open `http://127.0.0.1:5000`.
 
 Upload a portrait or load a photo link, then drag the image inside the square
 and adjust the zoom slider to align the face with the guide. Arrow keys move
-the image; Shift + arrow keys move it farther. Reset restores the initial fit.
-The guide uses the target face size and center in `face_crop_calibration.json`.
+the image; Shift + arrow keys move it farther. Drag the nine outline handles (one at the crown, two at the upper head, two at the cheeks, two at the neck, and two at the frame edges) to reshape the outer outline around the portrait,
+or focus a handle and use arrow keys. Each part of the outline adjusts independently. The round endpoint handles start
+at the two bottom corners and slide along the bottom or side edges, so the
+shoulder outline can meet the frame away from its corners. These controls only change the
+guide: the photo pixels and final crop are never warped. Reset outline restores
+the training-derived boundary; Reset all also restores the image position.
+The passport-style guide follows the symmetric majority silhouette of 200 local
+training portraits, including hair, neck, and the tops of the shoulders. The
+shaded area makes the typical headroom and shoulder framing easier to match.
+Regenerate it from transparent training images with
+`.venv/bin/python tools/build_portrait_guide.py`.
 White space outside the photo becomes white padding.
 
 Colorization uses exactly the chosen 240 × 240 crop for linear, KNN, and hybrid
@@ -88,6 +97,7 @@ Run the manual crop integration checks (with the model artifacts present):
 
 ```sh
 .venv/bin/python -m unittest discover -s tests
+node --test tests/test_portrait_boundary.cjs
 ```
 
 The web app requires `linear_color_model.npz`. If that file is missing, the UI
