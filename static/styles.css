@@ -175,7 +175,7 @@ code {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(280px, 0.55fr) minmax(0, 1.45fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 38px;
   align-items: start;
 }
@@ -504,7 +504,34 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
   padding: 8px 12px;
   margin-top: 12px;
 }
-.crop-editor { margin-top: 28px; }
+.crop-editor { margin-top: 18px; }
+#input-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(28px, 5vw, 80px);
+  align-items: start;
+}
+.upload-panel, .crop-panel { min-width: 0; }
+.crop-panel { width: 100%; max-width: 480px; justify-self: center; }
+.crop-placeholder {
+  display: grid;
+  place-content: center;
+  gap: 12px;
+  text-align: center;
+  aspect-ratio: 1;
+  margin-top: 24px;
+  padding: 32px;
+  border: 1px dashed #799281;
+  border-radius: 6px;
+  background: var(--soft);
+  color: var(--muted);
+}
+.crop-placeholder strong { font: 500 28px/1.2 "Newsreader", Georgia, serif; color: var(--green); }
+.crop-placeholder span { max-width: 290px; }
+@media (max-width: 760px) {
+  #input-controls { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .crop-panel { max-width: 480px; justify-self: start; }
+}
 .crop-editor h3 { font-size: 27px; }
 .crop-editor p, .crop-editor small { font-size: 13px; color: var(--muted); }
 .crop-editor p { margin: 10px 0 16px; }

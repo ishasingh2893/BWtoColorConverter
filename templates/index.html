@@ -59,6 +59,7 @@
       <section class="workspace" aria-label="Portrait colorization workspace">
         <form class="input-panel" id="colorize-form">
           <fieldset id="input-controls">
+          <section class="upload-panel" aria-label="Choose portrait">
           <p class="eyebrow">01 / INPUT</p>
           <h2>Choose a portrait.</h2>
 
@@ -84,8 +85,15 @@
 
           <button type="button" class="secondary-button" id="load-link">Load photo link</button>
 
+          </section>
+          <section class="crop-panel" aria-label="Crop and fit portrait">
+            <p class="eyebrow">02 / CROP &amp; FIT</p>
+            <h2>Fit your portrait.</h2>
+            <div id="crop-placeholder" class="crop-placeholder">
+              <strong>Your crop workspace</strong>
+              <span>Upload a portrait or load a photo link to position it and adjust the outline.</span>
+            </div>
           <section id="crop-editor" class="crop-editor" hidden aria-label="Position portrait">
-            <h3>Fit the outline around your portrait.</h3>
             <p id="crop-help">Drag to position and zoom to fit your whole head inside the outline. Align your neck and the tops of your shoulders with the lower part of the guide. Leave the small gap above your hair. Adjust the head, cheek, and neck points, then slide the two lower corner points along the frame edge to fit your shoulders.</p>
             <div class="crop-box" id="crop-box" tabindex="0" role="application" aria-label="Portrait crop. Use arrow keys to move the image; hold Shift for larger steps." aria-describedby="crop-help">
               <canvas id="crop-canvas" width="480" height="480"></canvas>
@@ -114,6 +122,7 @@
             </div>
             <small>The outline follows the typical head-and-shoulder silhouette of 200 training portraits. The square is your final crop; the shaded guide is not included.</small>
           </section>
+          </section>
           </fieldset>
           <div class="actions">
             <button type="submit" id="submit-button" disabled>Colorize portrait <span>→</span></button>
@@ -125,7 +134,7 @@
         <section class="preview-panel" aria-label="Colorized output">
           <div class="preview-head">
             <div>
-              <p class="eyebrow">02 / OUTPUT</p>
+              <p class="eyebrow">03 / OUTPUT</p>
               <h2>Review the result.</h2>
             </div>
             <span id="result-badge">Waiting</span>

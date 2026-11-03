@@ -84,6 +84,7 @@ function invalidateSource() {
   drag = null;
   submit.disabled = true;
   $("#crop-editor").hidden = true;
+  $("#crop-placeholder").hidden = false;
   $("#raw-input-preview").hidden = true;
   $("#empty-raw-input").hidden = false;
   clearResults();
@@ -118,6 +119,7 @@ async function prepare(file) {
     image = loaded;
     showImage("#raw-input-preview", "#empty-raw-input", data.image);
     $("#crop-editor").hidden = false;
+    $("#crop-placeholder").hidden = true;
     submit.disabled = false;
     reset();
   } catch (error) {
