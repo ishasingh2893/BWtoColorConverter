@@ -93,11 +93,18 @@ Colorization uses exactly the chosen 240 × 240 crop for linear, KNN, and hybrid
 outputs. The website does not automatically detect, recrop, or segment the face.
 The guide is an alignment aid and is never included in the submitted image.
 
+After colorizing, the Warm to neutral slider applies a global LAB correction
+(up to −3 in A and −10 in B), keeping L unchanged before RGB gamut clipping.
+White padding is preserved. The correction is adjustable, starts at zero, and
+always uses the original model output to avoid cumulative changes. Reset color
+balance restores the original. This is a manual color cast adjustment rather
+than a learned calibration.
+
 Run the manual crop integration checks (with the model artifacts present):
 
 ```sh
 .venv/bin/python -m unittest discover -s tests
-node --test tests/test_portrait_boundary.cjs
+node --test tests/*.cjs
 ```
 
 The web app requires `linear_color_model.npz`. If that file is missing, the UI

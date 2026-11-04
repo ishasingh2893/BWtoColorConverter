@@ -140,6 +140,13 @@
             <span id="result-badge">Waiting</span>
           </div>
 
+          <section id="color-balance" class="color-balance" hidden aria-label="Output color balance">
+            <label for="neutral-bias">Warm to neutral <output id="neutral-bias-value">Original</output></label>
+            <input id="neutral-bias" type="range" min="0" max="100" step="1" value="0" aria-describedby="balance-help" />
+            <div class="balance-ends"><span>Original warmth</span><span>More neutral</span></div>
+            <p id="balance-help">Reduce the warm cast across all colorized results. Adjust until skin tones look right.</p>
+            <button type="button" class="secondary-button" id="reset-bias">Reset color balance</button>
+          </section>
           <div class="portrait-stage">
             <figure>
               <div class="empty-result" id="empty-raw-input">
@@ -218,6 +225,7 @@
 
     <script id="portrait-guide-data" type="application/json">{{ portrait_guide | tojson }}</script>
     <script src="{{ url_for('static', filename='portrait-boundary.js') }}"></script>
+    <script src="{{ url_for('static', filename='color-balance.js') }}"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
   </body>
 </html>

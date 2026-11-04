@@ -15,6 +15,49 @@ let y = 0;
 let drag = null;
 let version = 0;
 let loading = false;
+let originalOutputs = {};
+const biasSlider = $("#neutral-bias");
+function applyColorBalance() {
+  const amount = Number(biasSlider.value);
+  $("#neutral-bias-value").textContent = amount ? `${amount}% neutral correction` : "Original";
+  for (const [name, original] of Object.entries(originalOutputs)) {
+    if (!amount) {
+      $(`#${name}-output-preview`).src = original.url;
+      continue;
+    }
+    const surface = document.createElement("canvas");
+    surface.width = original.width;
+    surface.height = original.height;
+    const ctx = surface.getContext("2d");
+    const pixels = ctx.createImageData(original.width, original.height);
+    pixels.data.set(ColorBalance.apply(original.pixels, amount));
+    ctx.putImageData(pixels, 0, 0);
+    $(`#${name}-output-preview`).src = surface.toDataURL("image/png");
+  }
+}
+biasSlider.addEventListener("input", applyColorBalance);
+$("#reset-bias").addEventListener("click", () => {
+  biasSlider.value = "0";
+  applyColorBalance();
+});
+async function loadOutputColors(outputs) {
+  const prepared = {};
+  for (const [name, url] of Object.entries(outputs)) {
+    const decoded = new Image();
+    decoded.src = url;
+    await decoded.decode();
+    const surface = document.createElement("canvas");
+    surface.width = decoded.naturalWidth;
+    surface.height = decoded.naturalHeight;
+    const ctx = surface.getContext("2d");
+    ctx.drawImage(decoded, 0, 0);
+    prepared[name] = { url, width: surface.width, height: surface.height,
+      pixels: ctx.getImageData(0, 0, surface.width, surface.height).data };
+  }
+  originalOutputs = prepared;
+  $("#color-balance").hidden = !Object.keys(prepared).length;
+  applyColorBalance();
+}
 const guideData = JSON.parse($("#portrait-guide-data").textContent);
 const outlineHandles = [$("#neck-left"), $("#neck-right"), $("#shoulder-left"), $("#shoulder-right"), $("#head-left"), $("#head-right"), $("#cheek-left"), $("#cheek-right"), $("#crown-top")];
 let outlineOffsets = guideData.anchors.map(() => ({ x: 0, y: 0 }));
@@ -47,6 +90,8 @@ function showImage(id, emptyId, src) {
   $(emptyId).hidden = true;
 }
 function clearResults() {
+  originalOutputs = {};
+  $("#color-balance").hidden = true;
   for (const name of ["processed-input", "linear-output", "knn-output", "hybrid-output"]) {
     $(`#${name}-preview`).hidden = true;
   }
@@ -238,6 +283,7 @@ form.addEventListener("submit", async (event) => {
   $("#input-controls").disabled = true;
   badge.textContent = "Working";
   status("Colorizing your crop…");
+  clearResults();
   try {
     const output = document.createElement("canvas");
     output.width = output.height = 240;
@@ -258,6 +304,7 @@ form.addEventListener("submit", async (event) => {
         $(`#empty-${name}-result strong`).textContent = `${name.toUpperCase()} model unavailable.`;
       }
     }
+    await loadOutputColors(data.outputs || {});
     badge.textContent = "Complete";
     status("Model comparison ready. Adjust the crop to try another framing.");
   } catch (error) {
