@@ -69,7 +69,7 @@ jobs:
               --code ImageUri="$IMAGE_URI" \
               --role "$LAMBDA_EXECUTION_ROLE_ARN" \
               --architectures x86_64 \
-              --memory-size 4096 \
+              --memory-size 3008 \
               --timeout 900 \
               --ephemeral-storage Size=2048 \
               --environment '{"Variables":{"CORS_ORIGINS":"https://ishasingh.cv,https://www.ishasingh.cv"}}' \

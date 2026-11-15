@@ -4,7 +4,7 @@ This repository deploys the existing Flask app as an AWS Lambda container image.
 
 ## One-time AWS setup
 
-Create a Lambda execution role with CloudWatch Logs permissions. The GitHub Actions workflow creates the ECR repository, Lambda function, and public Function URL on its first run. Give the Lambda enough memory for OpenCV/NumPy (the workflow uses 4 GB) and a timeout appropriate for image processing.
+Create a Lambda execution role with CloudWatch Logs permissions. The GitHub Actions workflow creates the ECR repository, Lambda function, and public Function URL on its first run. Give the Lambda enough memory for OpenCV/NumPy (the workflow uses 3008 MB) and a timeout appropriate for image processing.
 
 - `https://ishasingh.cv`
 - `https://www.ishasingh.cv`
