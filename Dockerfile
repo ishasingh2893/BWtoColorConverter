@@ -4,8 +4,8 @@ FROM public.ecr.aws/lambda/python:3.11
 # HTTP service inside a Lambda container image.
 COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
 
-COPY requirements.txt .
-RUN python -m pip install --no-cache-dir -r requirements.txt gunicorn
+COPY requirements-runtime.txt .
+RUN python -m pip install --no-cache-dir -r requirements-runtime.txt
 
 COPY . .
 

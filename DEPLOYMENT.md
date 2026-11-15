@@ -1,6 +1,6 @@
 # AWS Lambda deployment
 
-This repository deploys the existing Flask app as an AWS Lambda container image. The same Lambda Function URL serves both the Flask UI and its API, so this deployment has no dependency on Sites.
+This repository deploys the existing Flask app as an AWS Lambda container image. The same Lambda Function URL serves both the Flask UI and its API, so this deployment has no dependency on Sites. `requirements-runtime.txt` contains only the packages needed by the deployed app; the full `requirements.txt` remains for local training and development.
 
 ## One-time AWS setup
 
