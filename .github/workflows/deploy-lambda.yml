@@ -82,7 +82,7 @@ jobs:
             aws lambda create-function-url-config \
               --function-name "$LAMBDA_FUNCTION_NAME" \
               --auth-type NONE \
-              --cors '{"AllowOrigins":["https://ishasingh.cv","https://www.ishasingh.cv"],"AllowMethods":["GET","POST","OPTIONS"],"AllowHeaders":["Content-Type"]}' \
+              --cors '{"AllowOrigins":["https://ishasingh.cv","https://www.ishasingh.cv"],"AllowMethods":["GET","POST"],"AllowHeaders":["Content-Type"]}' \
               --region "$AWS_REGION" >/dev/null
             aws lambda add-permission \
               --function-name "$LAMBDA_FUNCTION_NAME" \
