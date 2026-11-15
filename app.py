@@ -2,6 +2,7 @@ import base64
 import mimetypes
 import json
 import tempfile
+import os
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -22,6 +23,25 @@ MAX_IMAGE_BYTES = 12 * 1024 * 1024
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_IMAGE_BYTES + 1024 * 1024
+
+
+@app.after_request
+def add_cors_headers(response):
+    allowed_origins = {
+        origin.strip()
+        for origin in os.environ.get(
+            "CORS_ORIGINS",
+            "https://ishasingh.cv,https://www.ishasingh.cv",
+        ).split(",")
+        if origin.strip()
+    }
+    origin = request.headers.get("Origin")
+    if origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Vary"] = "Origin"
+    return response
 
 
 class ImageLinkParser(HTMLParser):

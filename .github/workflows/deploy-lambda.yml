@@ -1,0 +1,102 @@
+name: Deploy Flask backend to AWS Lambda
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+  LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+  LAMBDA_EXECUTION_ROLE_ARN: ${{ vars.LAMBDA_EXECUTION_ROLE_ARN }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify runtime model artifacts
+        run: |
+          test -f linear_color_model.npz || { echo "Missing linear_color_model.npz"; exit 1; }
+          test -f knn_lookup_color_model.npz || { echo "Missing knn_lookup_color_model.npz"; exit 1; }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Ensure ECR repository exists
+        run: |
+          aws ecr describe-repositories \
+            --repository-names "$ECR_REPOSITORY" \
+            --region "$AWS_REGION" >/dev/null 2>&1 || \
+          aws ecr create-repository \
+            --repository-name "$ECR_REPOSITORY" \
+            --region "$AWS_REGION" >/dev/null
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" .
+          docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "IMAGE_URI=$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> "$GITHUB_ENV"
+
+      - name: Update Lambda function
+        run: |
+          if aws lambda get-function --function-name "$LAMBDA_FUNCTION_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws lambda update-function-code \
+              --function-name "$LAMBDA_FUNCTION_NAME" \
+              --image-uri "$IMAGE_URI" \
+              --region "$AWS_REGION" >/dev/null
+          else
+            aws lambda create-function \
+              --function-name "$LAMBDA_FUNCTION_NAME" \
+              --package-type Image \
+              --code ImageUri="$IMAGE_URI" \
+              --role "$LAMBDA_EXECUTION_ROLE_ARN" \
+              --architectures x86_64 \
+              --memory-size 4096 \
+              --timeout 900 \
+              --ephemeral-storage Size=2048 \
+              --environment 'Variables={CORS_ORIGINS=https://ishasingh.cv,https://www.ishasingh.cv}' \
+              --region "$AWS_REGION" >/dev/null
+          fi
+
+      - name: Ensure public Lambda Function URL exists
+        run: |
+          if ! aws lambda get-function-url-config --function-name "$LAMBDA_FUNCTION_NAME" --region "$AWS_REGION" >/dev/null 2>&1; then
+            aws lambda create-function-url-config \
+              --function-name "$LAMBDA_FUNCTION_NAME" \
+              --auth-type NONE \
+              --cors 'AllowOrigins=["https://ishasingh.cv","https://www.ishasingh.cv"],AllowMethods=["GET","POST","OPTIONS"],AllowHeaders=["Content-Type"]' \
+              --region "$AWS_REGION" >/dev/null
+            aws lambda add-permission \
+              --function-name "$LAMBDA_FUNCTION_NAME" \
+              --statement-id FunctionURLAllowPublicAccess \
+              --action lambda:InvokeFunctionUrl \
+              --principal '*' \
+              --function-url-auth-type NONE \
+              --region "$AWS_REGION" >/dev/null
+          fi
+
+      - name: Print deployed URL
+        run: |
+          aws lambda get-function-url-config \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query FunctionUrl \
+            --output text

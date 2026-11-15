@@ -6,8 +6,12 @@ data/
 BWdata/
 raw_kaggle_data/
 transformed_data.npz
+# The trained models are runtime assets for the deployed Flask service.
+# Keep them out of local-only generated-output rules so they can be committed.
 linear_color_model.npz
 knn_lookup_color_model.npz
+!linear_color_model.npz
+!knn_lookup_color_model.npz
 linear_output.png
 linear_output_full_dataset.png
 knn_lookup_output.png
