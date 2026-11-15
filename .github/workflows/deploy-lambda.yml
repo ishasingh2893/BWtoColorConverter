@@ -84,12 +84,30 @@ jobs:
               --auth-type NONE \
               --cors '{"AllowOrigins":["https://ishasingh.cv","https://www.ishasingh.cv"],"AllowMethods":["GET","POST"],"AllowHeaders":["Content-Type"]}' \
               --region "$AWS_REGION" >/dev/null
+          fi
+
+          POLICY=$(aws lambda get-policy \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query Policy \
+            --output text 2>/dev/null || true)
+
+          if ! printf '%s' "$POLICY" | grep -q 'FunctionURLAllowPublicAccess'; then
             aws lambda add-permission \
               --function-name "$LAMBDA_FUNCTION_NAME" \
               --statement-id FunctionURLAllowPublicAccess \
               --action lambda:InvokeFunctionUrl \
               --principal '*' \
               --function-url-auth-type NONE \
+              --region "$AWS_REGION" >/dev/null
+          fi
+
+          if ! printf '%s' "$POLICY" | grep -q 'FunctionURLAllowPublicInvoke'; then
+            aws lambda add-permission \
+              --function-name "$LAMBDA_FUNCTION_NAME" \
+              --statement-id FunctionURLAllowPublicInvoke \
+              --action lambda:InvokeFunction \
+              --principal '*' \
               --region "$AWS_REGION" >/dev/null
           fi
 
