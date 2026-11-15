@@ -86,30 +86,30 @@ jobs:
               --region "$AWS_REGION" >/dev/null
           fi
 
-          POLICY=$(aws lambda get-policy \
+          aws lambda add-permission \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --statement-id FunctionURLAllowPublicAccess \
+            --action lambda:InvokeFunctionUrl \
+            --principal '*' \
+            --function-url-auth-type NONE \
+            --region "$AWS_REGION" >/dev/null 2>&1 || \
+          aws lambda get-policy \
             --function-name "$LAMBDA_FUNCTION_NAME" \
             --region "$AWS_REGION" \
             --query Policy \
-            --output text 2>/dev/null || true)
+            --output text | grep -q 'FunctionURLAllowPublicAccess'
 
-          if ! printf '%s' "$POLICY" | grep -q 'FunctionURLAllowPublicAccess'; then
-            aws lambda add-permission \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --statement-id FunctionURLAllowPublicAccess \
-              --action lambda:InvokeFunctionUrl \
-              --principal '*' \
-              --function-url-auth-type NONE \
-              --region "$AWS_REGION" >/dev/null
-          fi
-
-          if ! printf '%s' "$POLICY" | grep -q 'FunctionURLAllowPublicInvoke'; then
-            aws lambda add-permission \
-              --function-name "$LAMBDA_FUNCTION_NAME" \
-              --statement-id FunctionURLAllowPublicInvoke \
-              --action lambda:InvokeFunction \
-              --principal '*' \
-              --region "$AWS_REGION" >/dev/null
-          fi
+          aws lambda add-permission \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --statement-id FunctionURLAllowPublicInvoke \
+            --action lambda:InvokeFunction \
+            --principal '*' \
+            --region "$AWS_REGION" >/dev/null 2>&1 || \
+          aws lambda get-policy \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query Policy \
+            --output text | grep -q 'FunctionURLAllowPublicInvoke'
 
       - name: Print deployed URL
         run: |

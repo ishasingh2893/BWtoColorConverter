@@ -1,8 +1,12 @@
-FROM public.ecr.aws/lambda/python:3.11
+FROM python:3.11-slim-bookworm
 
 # Lambda Web Adapter lets the existing Flask/Gunicorn application run as an
 # HTTP service inside a Lambda container image.
-COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt/extensions/lambda-adapter
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:1.1.0 /lambda-adapter /opt/extensions/lambda-adapter
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libglib2.0-0 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-runtime.txt .
 RUN python -m pip install --no-cache-dir -r requirements-runtime.txt
